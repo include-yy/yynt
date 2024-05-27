@@ -7,7 +7,7 @@
 ;; Created: 22 Apr 2024
 
 ;; Package-Version: 0.1
-;; Package-Requires: ((emacs "29.2") (emacsql "3.1.1"))
+;; Package-Requires: ((emacs "29.2"))
 ;; Keywords: manager
 ;; URL: https://github.com/include-yy/yynt
 
@@ -32,17 +32,16 @@
 ;;; Code:
 
 (require 'cl-lib)
-(require 'emacsql)
 
 (defvar yynt-project-list nil
   "list of all yynt project")
 (defvar yynt-current-project nil
-  "(name dir objs) list of current project")
+  "current project's `yynt-project' object")
 
 (cl-defstruct (yynt-project (:conc-name yynt-project--)
 			    (:constructor yynt-project--make)
 			    (:copier nil))
-  "Struct for yynt projects"
+  "Struct for yynt projects, create it using `yynt-create-project'"
   (name nil ; symbol of project name
    :documentation "Symbol of project name")
   (dir nil ; directory of project
@@ -50,35 +49,57 @@
   (pubdir nil ; directory for publish
 	  :documentation "directory for publish")
   (cache nil ; cache file path
-	 :documentation "cache directory of project")
+	 :documentation "cache file path of project")
   (builds nil; list of yynt-build objects
    :documentation "list of `yynt-build' objects"))
 
-(defun yynt-create-project (name &optional directory)
+(defun yynt-create-project (name pubdir cache &optional directory)
   "Create a new yynt project.
 
-NAME must be a symbol.
-This function also set current project to the created project"
-  (when (or (null name) (not (symbolp name)))
-    (error "yynt's project name must be a non-nil symbol"))
-  (ignore (or directory (setq directory default-directory)))
-  (let ((project (yynt-project--make :name name :dir directory)))
-    (setq yynt-project-list (cons project (cl-remove name yynt-project-list
-						     :key #'yynt-project--name)))
+NAME must be a non-nil symbol. PUBDIR is path to publication
+directory, and CACHE is path to CACHE file. relative path means
+parent directory is DIRECTORY.
+
+If DIRECTORY is not supplied, it is the value of
+`default-directory'.
+
+This function also set `yynt-current-project' to the created
+project."
+  (cl-assert (and (symbolp name) (not (null name))))
+  (cl-assert (and (stringp pubdir) (stringp cache)))
+  (cond
+   ((null directory) (setq directory default-directory))
+   ((and (file-exists-p directory)
+	 (file-directory-p directory))
+    (setq directory (file-name-as-directory directory)))
+   (t (error "directory may not exist or not a true directory: %s" directory)))
+  (unless (file-name-absolute-p pubdir)
+    (setq pubdir (expand-file-name pubdir directory)))
+  (unless (file-name-absolute-p cache)
+    (setq cache (expand-file-name cache directory)))
+  (let ((project (yynt-project--make :name name :dir directory
+				     :pubdir pubdir :cache cache)))
+    (setq yynt-project-list
+	  (cons project (cl-remove name yynt-project-list
+				   :key #'yynt-project--name)))
     (setq yynt-current-project project)))
 
 (defun yynt-choose-project (name)
   "interactively choose a project as current project
 
 NAME must be symbol type"
-  (interactive (list (intern (completing-read "Choose a project: "
-					      yynt-project-list nil t))))
-  (let ((project (assq name yynt-project-list)))
+  (interactive (list (intern (completing-read
+			      "Choose a project: "
+			      (mapcar #'yynt-project--name yynt-project-list)
+			      nil t))))
+  (let ((project (car-safe (cl-member name yynt-project-list
+				      :key #'yynt-project--name))))
     (setq yynt-current-project project)))
 
 (defun yynt-in-project-p (file &optional project)
-  "determine if FILE is in `yynt-current-project' or not."
-  (file-in-directory-p (file-truename file) (or project (yynt-project--dir yynt-current-project))))
+  "determine if FILE is in PROJECT or not."
+  (file-in-directory-p (file-truename file)
+		       (or project (yynt-project--dir yynt-current-project))))
 
 (cl-defstruct (yynt-build (:conc-name yynt-build--)
 			  (:constructor yynt-build--make)
@@ -88,17 +109,19 @@ NAME must be symbol type"
 	:documentation "type of build object. It can be 0, 1 or 2")
   (path nil ; path to build object
 	:documentation "full path to this build-object")
-  (collect #'ignore
-	   :documentation ; collect all items
-	   "function that take build object as arg and  return items need to be built")
-  (export #'ignore ; actual export function
-	  :documentation "Function that 1st arg must be file")
-  (extra nil ; files need to be generated after build '((infiles) . (outfiles))
-	 :documentation "files need to be generated after build")
+  (collect #'ignore ; collect all items
+	   :documentation "function that return list of item need to be built")
   (info nil ; plist holding contextual information
 	:documentation "plist that pass to export function's ext-plist arg")
-  (info-extra nil ; additional plist for certain usage.
-	      :documentation "additional plist for certain usage"))
+  (collect-ex #'ignore
+	      :documentation "function that collect extra files")
+  (info-ex nil ; additional plist for certain usage.
+	      :documentation "additional plist for certain usage")
+  (fn #'ignore ; actual export function
+      :documentation "Function take arglist (PLIST &optional force)")
+  (attrs nil ; list of meta info needs to be taken from item
+	 :documentation "list of meta info needs to be taken from item"))
+
 
 (cl-defun yynt-create-build (&key type path collect export extra info info-extra)
   "create `yynt-build' object with `yynt-current-project' as belonged project."
