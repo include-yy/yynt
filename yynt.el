@@ -7,7 +7,7 @@
 ;; Created: 22 Apr 2024
 
 ;; Package-Version: 0.1
-;; Package-Requires: ((emacs "29.2"))
+;; Package-Requires: ((emacs "29.2") (emacsql "3.1"))
 ;; Keywords: manager
 ;; URL: https://github.com/include-yy/yynt
 
@@ -33,6 +33,7 @@
 
 (require 'cl-lib)
 (require 'org)
+(require 'emacsql-sqlite)
 
 (defvar yynt-project-list nil
   "list of all yynt project")
@@ -51,6 +52,8 @@
 	  :documentation "directory for publish")
   (cache nil ; cache file path
 	 :documentation "cache file path of project")
+  (cache-items nil
+	       :documentation "items need to be cached")
   (builds nil; list of yynt-build objects
    :documentation "list of `yynt-build' objects"))
 
@@ -67,7 +70,7 @@ If DIRECTORY is not supplied, it is the value of
 This function also set `yynt-current-project' to the created
 project."
   (cl-assert (and (symbolp name) (not (null name))))
-  (cl-assert (and (stringp pubdir) (stringp cache)))
+  (cl-assert (stringp pubdir))
   (cond
    ((null directory) (setq directory default-directory))
    ((and (file-exists-p directory)
@@ -76,7 +79,7 @@ project."
    (t (error "directory may not exist or not a true directory: %s" directory)))
   (unless (file-name-absolute-p pubdir)
     (setq pubdir (expand-file-name pubdir directory)))
-  (unless (file-name-absolute-p cache)
+  (unless (or (null cache) (file-name-absolute-p cache))
     (setq cache (expand-file-name cache directory)))
   (let ((project (yynt-project--make :name name :dir directory
 				     :pubdir pubdir :cache cache)))
