@@ -32,6 +32,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'org)
 
 (defvar yynt-project-list nil
   "list of all yynt project")
@@ -105,6 +106,8 @@ NAME must be symbol type"
 			  (:constructor yynt-build--make)
 			  (:copier nil))
   "Struct that contains build info of a series of files"
+  (project nil ; project object that belongs to
+	   :documentation "project object that belongs to")
   (type 0 ; type of build object
 	:documentation "type of build object. It can be 0, 1 or 2")
   (path nil ; path to build object
@@ -120,25 +123,39 @@ NAME must be symbol type"
   (fn #'ignore ; actual export function
       :documentation "Function take arglist (PLIST &optional force)")
   (attrs nil ; list of meta info needs to be taken from item
-	 :documentation "list of meta info needs to be taken from item"))
+	 :documentation "list of meta info needs to be taken from item")
+  (no-cache-files-ht nil :documentation "hashtable that stores file not need cache")
+  (ext-files nil :documentation "external files depend on this build object")
+  (included-resources nil :documentation "resources need to be exported")
+  (excluded-resources-2 nil :documentation "resource need to be excluded, use for type 2"))
 
-
-(cl-defun yynt-create-build (&key type path collect export extra info info-extra)
+(cl-defun yynt-create-build (&key type path collect info collect-ex info-ex
+				  fn attrs no-cache-files external-files
+				  included-resources excluded-resources-2)
   "create `yynt-build' object with `yynt-current-project' as belonged project."
   (when (not (yynt-project-p yynt-current-project))
     (error "seems not a valid yynt-project: %s" yynt-current-project))
-  (let* ((full-path (expand-file-name path (yynt-project--dir yynt-current-project)))
-	 (extra-full-path (cons (mapcar (lambda (x) (expand-file-name x full-path)) (car extra))
-				(mapcar (lambda (x) (expand-file-name x (yynt-project--dir
-								     yynt-current-project)))
-					(cdr extra))))
+  (let* ((project-dir (yynt-project--dir yynt-current-project))
+	 (full-path (expand-file-name path project-dir))
+	 (final-path (if (not (file-directory-p full-path)) full-path
+		       (file-name-as-directory full-path)))
+	 (nocache-hl (let ((ht (make-hash-table :test #'equal)))
+		       (prog1 ht (mapc (lambda (x) (puthash x t ht)) no-cache-files))))
 	 (obj (yynt-build--make
-	       :type type :path full-path
-	       :collect collect :export export
-	       :extra extra-full-path :info info :info-extra info-extra))
+	       :project yynt-current-project
+	       :type type :path final-path
+	       :collect collect :info info
+	       :collect-ex collect-ex :info-ex info-ex
+	       :fn fn :attrs attrs
+	       :no-cache-files-ht nocache-hl
+	       :ext-files external-files
+	       :included-resources included-resources
+	       :excluded-resources-2 excluded-resources-2))
 	 (builds (yynt-project--builds yynt-current-project)))
     (setf (yynt-project--builds yynt-current-project)
-	  (cons obj (cl-remove full-path builds :test #'string= :key #'yynt-build--path)))))
+	  (cons obj (cl-remove full-path builds
+			       :test #'string=
+			       :key #'yynt-build--path)))))
 
 (defun yynt-in-build-p (bobj file)
   "determine if File is in BOBJ build object
@@ -151,12 +168,131 @@ file may have some constrains (WIP)"
 	     (file-equal-p bpath (file-name-directory (file-name-directory file)))))
       (_ (error "seems not a valid build object type")))))
 
+(defun yynt-no-cache-p (bobj file)
+  "determine if FILE is in no-cache-files-ht"
+  (let ((ht (yynt-build--no-cache-files-ht bobj))
+	(path (yynt-build--path bobj))
+	(type (yynt-build--type bobj)))
+    (pcase type
+      (0 (gethash (file-name-nondirectory path) ht))
+      ((or 1 2)
+       (let ((name (substring file (length path))))
+	 (gethash name ht)))
+      (_ (error "not a valid build-object type: %s" type)))))
+
 (defun yynt-get-file-build (file)
   "get the corresponding build object from filename FILE"
-  (if-let* ((project (cl-find-if (lambda (p) (yynt-in-project-p file p)) yynt-project-list))
-	    (bobj (cl-find-if (lambda (b) (yynt-in-build-p file b)) (yynt-project--builds project))))
+  (if-let* ((project (cl-find-if (lambda (p) (yynt-in-project-p file p))
+				 yynt-project-list))
+	    (bobj (cl-find-if (lambda (b) (yynt-in-build-p file b))
+			      (yynt-project--builds project))))
       bobj
-    (error "file %s may not belongs to any exist projects or build objects" file)))
+    nil))
+
+
+(defun yynt-export-onefile (bobj file &optional ex force)
+  "export one file under BOBJ"
+  (unless (file-exists-p file)
+    (error "file not exists: %s" file))
+  (let ((fn (yynt-build--fn bobj))
+	(info (if ex (org-combine-plists
+		      (yynt-build--info bobj)
+		      (yynt-build--info-ex bobj))
+		(yynt-build--info bobj)))
+	(force (or force (yynt-no-cache-p bobj file))))
+    (if-let ((buf (get-file-buffer file)))
+	(with-current-buffer buf
+	  (funcall fn info force))
+      (with-current-buffer (find-file-noselect file)
+	(unwind-protect (funcall fn info force)
+	  (kill-buffer))))))
+
+(defun yynt-export-extra-files (bobj)
+  "export whole build object's external files"
+  (let* ((extfiles (yynt-build--ext-files bobj))
+	 (base-path (yynt-project--dir (yynt-build--project bobj)))
+	 (full-files (mapcar (lambda (x) (file-name-concat base-path x)) extfiles)))
+    (mapc (lambda (x)
+	    (if-let ((obj (yynt-get-file-build x)))
+		(yynt-export-onefile obj x t t)
+	      (error "file %s not belongs to any build object" x)))
+	  full-files)))
+
+(defun yynt-export-build-object (bobj &optional force noexternal)
+  "export whole build object's files"
+  (let ((type (yynt-build--type bobj)))
+    (pcase type
+      (0 (let ((file (yynt-build--path bobj)))
+	   (yynt-export-onefile bobj file nil force)))
+      ((or 1 2)
+       (let* ((co-fn (yynt-build--collect bobj))
+	      (co-fn-ex (yynt-build--collect-ex bobj))
+	      (files-1 (funcall co-fn bobj))
+	      (files-2 (funcall co-fn-ex bobj)))
+	 (mapc (lambda (x) (yynt-export-onefile bobj x nil force)) files-1)
+	 (mapc (lambda (x) (yynt-export-onefile bobj x t force)) files-2)))
+      (_ (error "not a valid build object type: %s" type)))
+    (unless noexternal
+      (yynt-export-extra-files bobj))))
+
+(defun yynt-export-build-object-list (bobjs &optional force)
+  "export a list of build object"
+  (let ((ext-files (cl-delete-duplicates
+		    (apply #'append (mapcar #'yynt-build--ext-files bobjs))
+		    :test #'equal)))
+    (mapc (lambda (x) (yynt-export-build-object x force t)))
+    (mapc (lambda (x)
+	    (if-let ((obj (yynt-get-file-build x)))
+		(yynt-export-onefile obj x t t)
+	      (error "file %s not belong to any build object" x)))
+	  ext-files)))
+
+(defun yynt-export-file (filename &optional force)
+  "User Command, export current buffer
+If called interactively, use current's buffer-file-name as FILENAME
+
+If invoked with C-u, force export"
+  (interactive (list (buffer-file-name) current-prefix-arg))
+  (if (null filename)
+      (user-error "buffer seems not have `buffer-file-name'")
+    (let ((bobj (yynt-get-file-build filename)))
+      (if (null bobj)
+	  (user-error "file %s seems not belong to one build object" filename)
+	(if (eq 0 (yynt-build--type bobj))
+	    (yynt-export-onefile bobj filename nil force)
+	  (let* ((len (length (yynt-build--path bobj)))
+		 (basename (substring filename len)))
+	    (cond
+	     ((cl-member basename (funcall (yynt-build--collect bobj) bobj)
+			 :key (lambda (x) (substring x len)))
+	      (yynt-export-onefile bobj filename nil force))
+	     ((cl-member basename (funcall (yynt-build--collect-ex bobj) bobj)
+			 :key (lambda (x) (substring x len)))
+	      (yynt-export-onefile bobj filename t force))
+	     (t (user-error "file seems not a exportable file"))))
+	  (yynt-export-extfile bobj))))))
+
+(defun yynt-get-project-build-relative-path (&optional project)
+  "return alist of bobj's relative path name and bobj"
+  (ignore (or project (setq project yynt-current-project)))
+  (let* ((bobjs (yynt-project--builds project))
+	 (len (length (yynt-project--dir project))))
+    (mapcar (lambda (x) (cons (substring (yynt-build--path x) len) x))
+	    bobjs)))
+
+(defun yynt-export-buildobj (bobj &optional force)
+  "User Command, export selected build object"
+  (interactive (list (completing-read
+		      "Select a build object:> "
+		      (cons '("t" . t)
+			    (yynt-get-project-build-relative-path))
+		      nil t)
+		     current-prefix-arg))
+  (cond
+   ((eq bobj t)
+    (yynt-export-build-object-list
+     (yynt-project--builds yynt-current-project)))
+   (yynt-export-build-object bobj force)))
 
 
 ;;; Caching functions
@@ -296,77 +432,7 @@ the file including them will be republished as well."
 		       included-files-mtime))))))
 
 
-
-(defun yynt-export-extfile (bobj)
-  "build all extra files"
-  (let* ((export-func (yynt-build--export bobj))
-	 (extra (yynt-build--extra bobj))
-	 (info (yynt-build--info bobj))
-	 (extinfo (yynt-build--info-extra bobj))
-	 (infiles (car extra))
-	 (outfiles (cdr extra)))
-    (mapc (lambda (f) (funcall export-func f nil nil nil nil
-			   (org-combine-plists info extinfo)))
-	  infiles)
-    (mapc #'yynt-export-onefile outfiles)))
-
-(defun yynt-export-onefile (file &optional no-extra)
-  "export one file"
-  (let* ((tname (file-truename file))
-	 (bobj (yynt-get-file-build tname))
-	 (extfile (car (yynt-build--extra bobj)))
-	 (export-fn (yynt-build--export bobj))
-	 (info (yynt-build--info bobj)))
-    (if (eq (yynt-build--type bobj) 0)
-	(if (string-match-p "\\.org\\'" tname)
-	    (funcall export-fn tname nil nil nil nil info)
-	  (funcall export-fn tname))
-      (let ((pls (if (not (member tname extfile)) info
-		   (org-combine-plists info (yynt-build--info-extra bobj)))))
-	(funcall export-fn tname nil nil nil nil pls)))
-    (when (and (not (member tname extfile))
-	       (not no-extra)
-	       (not (eq (yynt-build--type bobj) 1)))
-      (yynt-export-extfile bobj))))
-
-(defun yynt-export-buildobj (bobj &optional no-extra)
-  "build all files in build object BOBJ"
-  (let* ((export-func (yynt-build--export bobj))
-	 (collect-func (yynt-build--collect bobj))
-	 (info (yynt-build--info bobj))
-	 (files (funcall collect-func bobj)))
-    (pcase (yynt-build--type bobj)
-      (0 (let* ((path (yynt-build--path bobj)))
-	   (if (string-match-p "\\.org\\'" path)
-	       (funcall export-func path nil nil nil nil info)
-	     (funcall export-func path))))
-      (1 (mapc (lambda (f) (funcall export-func f nil nil nil nil info)) files))
-      (2 (mapc (lambda (d) (mapc (lambda (f) (funcall export-func f nil nil nil nil info))
-			     (directory-files d t "\\.org\\'")))
-	       files))
-      (_ (error "unknwon build object type")))
-    ;; build extra files
-    (when (and (not no-extra)
-	       (not (eq (yynt-build--type bobj) 0)))
-      (yynt-export-extfile bobj))))
-
-
 ;;; Utils
-
-(defun yynt-wrap-export-function (fn)
-  "wrap a xxx-export-to-html function to take a filename argument
-
-the export function's prototype must be:"
-  (lambda (file &rest args)
-    (if (not (file-exists-p file))
-	(error "yynt: file not exists: %s" file)
-      (if-let ((buf (get-file-buffer file)))
-	  (with-current-buffer buf
-	    (apply fn args))
-	(with-current-buffer (find-file-noselect file)
-	  (unwind-protect
-	      (apply fn args)
-	    (kill-buffer)))))))
 
 (defun yynt-get-org-keywords (file infos)
   "get (keyword . value) alist from the head of FILE
@@ -434,7 +500,7 @@ When called interactively, it shows the log buffer."
     (when switch
       (switch-to-buffer (yynt--create-log-buffer)))))
 
-;; | pathname | name | type | tag | pub-time | build-time | export-time | export |
+;; | project-name | pathname | name | type | tag | pub-time | build-time | export-time | export |
 ;;   PRIMARY
 
 ;; Consider using ox-publish.el's cache and emacs's builtin SQLite3 support, and prefer the latter.
