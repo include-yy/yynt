@@ -67,6 +67,19 @@ If cache is nil, the caching mechanism is not used."
   (cache-items nil :documentation "Items that need to be cached.")
   (builds nil :documentation "list of `yynt-build' objects."))
 
+(defun yynt--string-nw-p (s)
+  "Return t if S is a string containing a non-blank character.
+Otherwise, return nil.
+
+Get from `org-string-nw-p'."
+  (and (stringp s) (string-match-p "[^ \r\t\n]" s)))
+
+(defun yynt--cache-item-p (s)
+  "Return t if S is a valid cache-item. Otherwise return nil."
+  (and (yynt--string-nw-p s)
+       (string-match-p "[A-Za-z][0-9A-Za-z_]*" s)
+       (not (member s (cons "path" yynt-project-fixed-fields)))))
+
 (defun yynt-create-project (name pubdir cache cache-items &optional directory)
   "Create a new yynt project.
 
@@ -83,20 +96,23 @@ that the caching mechanism is not used.
 CACHE-ITEMS is a list of strings that specifies the fields that need to
 be present in the database for the creation of the cache database.
 
+Items in CACHE-ITEMS must satisfy the `yynt--cache-item-p' predicate,
+which means they must start with a letter and match the regular
+expression \"[0-9A-Za-z_]\". Additionally, they cannot contain items with
+the same names as those in `yynt-project-fixed-fields' (plus \"path\").
+
 DIRECTORY is the root directory of the project. If DIRECTORY is not
 provided, it will use `default-directory' as the default value."
+  ;; Check arguments
   (when (or (not (symbolp name)) (null name) (keywordp name))
     (error "not a valid project name: %s" name))
-  (unless (and (stringp pubdir) (not (string-empty-p pubdir)))
+  (unless (yynt--string-nw-p pubdir)
     (error "not a valid pubdir: %s" pubdir))
-  (unless (or (null cache) (and (stringp cache) (not (string-empty-p cache))))
+  (unless (or (null cache) (yynt--string-nw-p cache))
     (error "not a valid cache: %s" cache))
-  (unless (cl-every (lambda (x) (and (stringp x) (not (string-empty-p x))))
-		    cache-items)
+  (unless (cl-every #'yynt--cache-item-p cache-items)
     (error "not a valid cache-items %s" cache-items))
-  (unless (or (null directory)
-	      (and (stringp directory)
-		   (not (string-empty-p directory))))
+  (unless (or (null directory) (yynt--string-nw-p directory))
     (error "directory's type is not correct: %s" directory))
   ;; Normalization of the directory
   (cond
@@ -118,10 +134,8 @@ provided, it will use `default-directory' as the default value."
   ;; (when (and (stringp cache) (not (file-exists-p cache)))
   ;;   (with-temp-file cache))
   ;; Normalization of cache-items, converting all to lowercase
-  (setq cache-items (mapcar #'downcase cache-items))
-  (if (not (null (cl-intersection cache-items yynt-project-fixed-fields)))
-      (error "cache items have same names with fiexd fields")
-    (setq cache-items (append yynt-project-fixed-fields cache-items)))
+  (setq cache-items (append yynt-project-fixed-fields
+			    (mapcar #'downcase cache-items)))
   ;; Create Project object
   (let ((project (yynt-project--make :name name :dir directory
 				     :pubdir pubdir :cache cache
@@ -158,7 +172,12 @@ If PROJECT is not provided, use `yynt-current-project'."
 			 (yynt-project--dir project))
     (error "project not specified: %s" project)))
 
+(defun yynt-project-has-cache-p (project)
+  "Determine whether the PROJECT object uses the caching mechanism."
+  (yynt-project--cache project))
+
 (defun yynt-get-file-project-basename (file project)
+  "Get the relative path of a FILE with respect to its PROJECT."
   (declare (pure t))
   (if (not (yynt-in-project-p file project))
       (error "file %s not in project %s" file project)
@@ -240,12 +259,12 @@ ON CONFLICT(path) DO UPDATE SET %s"
 		 k-fields v-fields kv-seq))))))
 
 (defun yynt-delete-cache (project file)
-  "Delete a row"
+  "Delete a row."
   (let ((key (yynt-get-file-project-basename file project)))
     (yynt-with-sqlite project
       (sqlite-execute
        yynt--sqlite-obj
-       "DELETE FROM yynt WHERE path=?" `[,key]))))
+       "DELETE FROM yynt WHERE path=?" (list key)))))
 
 
 ;;; Definition of yynt-build and some helper functions.
