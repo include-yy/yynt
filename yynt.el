@@ -237,7 +237,7 @@ The value returned is the value of the last form in the body."
   (yynt-with-sqlite project
     (sqlite-execute yynt--sqlite-obj "DELETE FROM yynt;")))
 
-(defun yynt-upsert-cache (project file keys values)
+(defun yynt-upsert-cache-1 (project file keys values)
   "Update or insert a row: update if the file already exists, otherwise
 insert."
   (let* ((items (yynt-project--cache-items project))
@@ -250,21 +250,27 @@ insert."
     (if (not (cl-subsetp keys items :test #'string=))
 	(error "some keys not belong to cache-items: (%s, %s)"
 	       keys items)
-      (yynt-with-sqlite project
-	(sqlite-execute
-	 yynt--sqlite-obj
-	 (format "\
-INSERT INTO yynt (%s) VALUES (%s)
-ON CONFLICT(path) DO UPDATE SET %s"
-		 k-fields v-fields kv-seq))))))
-
-(defun yynt-delete-cache (project file)
-  "Delete a row."
-  (let ((key (yynt-get-file-project-basename file project)))
-    (yynt-with-sqlite project
       (sqlite-execute
        yynt--sqlite-obj
-       "DELETE FROM yynt WHERE path=?" (list key)))))
+       (format "\
+INSERT INTO yynt (%s) VALUES (%s)
+ON CONFLICT(path) DO UPDATE SET %s"
+	       k-fields v-fields kv-seq)))))
+
+(defun yynt-upsert-cache (project file keys values)
+  (yynt-with-sqlite project
+    (yynt-upsert-cache-1 project file keys values)))
+
+(defun yynt-delete-cache-1 (project file)
+  "Delete a row."
+  (let ((key (yynt-get-file-project-basename file project)))
+    (sqlite-execute
+     yynt--sqlite-obj
+     "DELETE FROM yynt WHERE path=?" (list key))))
+
+(defun yynt-delete-cache (project file)
+  (yynt-with-sqlite project
+    (yynt-delete-cache-1 project file)))
 
 
 ;;; Definition of yynt-build and some helper functions.
