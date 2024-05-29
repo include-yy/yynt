@@ -36,74 +36,114 @@
 (require 'emacsql-sqlite)
 
 (defvar yynt-project-list nil
-  "list of all yynt project")
+  "list of all yynt project.")
 (defvar yynt-current-project nil
-  "current project's `yynt-project' object")
+  "current project's `yynt-project' object.
+
+Set it using `yynt-choose-project'.")
+
+(defvar yynt--temp-project nil
+  "Temporary variable used for the creation phase,
+representing the current project.")
 
 (cl-defstruct (yynt-project (:conc-name yynt-project--)
 			    (:constructor yynt-project--make)
 			    (:copier nil))
-  "Struct for yynt projects, create it using `yynt-create-project'"
-  (name nil ; symbol of project name
-   :documentation "Symbol of project name")
-  (dir nil ; directory of project
-       :documentation "directory of project")
-  (pubdir nil ; directory for publish
-	  :documentation "directory for publish")
-  (cache nil ; cache file path
-	 :documentation "cache file path of project")
-  (cache-items nil
-	       :documentation "items need to be cached")
-  (builds nil; list of yynt-build objects
-   :documentation "list of `yynt-build' objects"))
+  "Struct definition for yynt projects. Create it with `yynt-create-project'.
 
-(defun yynt-create-project (name pubdir cache &optional directory)
+Create a build object belonging to the project by calling
+`yynt-create-build' after calling `yynt-create-project'.
+
+If cache is nil, the caching mechanism is not used."
+  (name nil :documentation "Symbol of the project name.")
+  (dir nil :documentation "Full path of the project.")
+  (pubdir nil :documentation "Full path of the publish directory.")
+  (cache nil :documentation "Full path of the cache file.")
+  (cache-items nil :documentation "Items that need to be cached.")
+  (builds nil :documentation "list of `yynt-build' objects."))
+
+(defun yynt-create-project (name pubdir cache cache-items &optional directory)
   "Create a new yynt project.
 
-NAME must be a non-nil symbol. PUBDIR is path to publication
-directory, and CACHE is path to CACHE file. relative path means
-parent directory is DIRECTORY.
+NAME is the name symbol of the project, which must be a non-nil and
+non-keyword symbol.
 
-If DIRECTORY is not supplied, it is the value of
-`default-directory'.
+PUBDIR is the publish directory, which must be of `string' type. If it
+is a relative path, it is relative to DIRECTORY.
 
-This function also set `yynt-current-project' to the created
-project."
-  (cl-assert (and (symbolp name) (not (null name))))
-  (cl-assert (stringp pubdir))
+CACHE can be nil or the path to the cache file. If it is a relative
+path, it is relative to the DIRECTORY. If CACHE is nil, it indicates
+that the caching mechanism is not used.
+
+CACHE-ITEMS is a list of strings that specifies the fields that need to
+be present in the database for the creation of the cache database.
+
+DIRECTORY is the root directory of the project. If DIRECTORY is not
+provided, it will use `default-directory' as the default value."
+  (when (or (not (symbolp name)) (null name) (keywordp name))
+    (error "not a valid project name: %s" name))
+  (unless (and (stringp pubdir) (not (string-empty-p pubdir)))
+    (error "not a valid pubdir: %s" pubdir))
+  (unless (or (null cache) (and (stringp cache) (not (string-empty-p cache))))
+    (error "not a valid cache: %s" cache))
+  (unless (or (null directory)
+	      (and (stringp directory)
+		   (not (string-empty-p directory))))
+    (error "directory's type is not correct: %s" directory))
+  ;; Normalization of the directory
   (cond
    ((null directory) (setq directory default-directory))
    ((and (file-exists-p directory)
 	 (file-directory-p directory))
-    (setq directory (file-name-as-directory directory)))
+    (setq directory (file-name-as-directory (expand-file-name directory))))
    (t (error "directory may not exist or not a true directory: %s" directory)))
+  ;; Normalization of the publish directory
   (unless (file-name-absolute-p pubdir)
     (setq pubdir (expand-file-name pubdir directory)))
+  ;; Create Publish directory if not exists
+  (unless (file-exists-p pubdir)
+    (make-directory pubdir t))
+  ;; Normalization of the cache file path
   (unless (or (null cache) (file-name-absolute-p cache))
     (setq cache (expand-file-name cache directory)))
+  ;; Create Cache file if necessary
+  (when (and (stringp cache) (not (file-exists-p cache)))
+    (with-temp-file cache))
+  ;; Create Project object
   (let ((project (yynt-project--make :name name :dir directory
-				     :pubdir pubdir :cache cache)))
+				     :pubdir pubdir :cache cache
+				     :cache-items cache-items)))
+    ;; Replace object with the same name if exists
     (setq yynt-project-list
-	  (cons project (cl-remove name yynt-project-list
+	  (cons project (cl-delete name yynt-project-list
 				   :key #'yynt-project--name)))
-    (setq yynt-current-project project)))
+    ;; Initialize cache if necessary
+    (when cache
+      (yynt-initialize-cache project))
+    (setq yynt--temp-project project)))
 
 (defun yynt-choose-project (name)
-  "interactively choose a project as current project
+  "Interactively select one from the existing project objects as the
+current project.
 
-NAME must be symbol type"
+NAME is the name of the project and is of symbol type."
   (interactive (list (intern (completing-read
 			      "Choose a project: "
 			      (mapcar #'yynt-project--name yynt-project-list)
 			      nil t))))
-  (let ((project (car-safe (cl-member name yynt-project-list
+  (if-let ((project (car-safe (cl-member name yynt-project-list
 				      :key #'yynt-project--name))))
-    (setq yynt-current-project project)))
+      (setq yynt-current-project project)
+    (user-error "Seems not a exist project object's name: %s" name)))
 
 (defun yynt-in-project-p (file &optional project)
-  "determine if FILE is in PROJECT or not."
-  (file-in-directory-p (file-truename file)
-		       (or project (yynt-project--dir yynt-current-project))))
+  "Determine if a file is located within the project.
+
+If PROJECT is not provided, use `yynt-current-project'."
+  (if-let ((project (or project yynt-current-project)))
+    (file-in-directory-p (file-truename file)
+			 (yynt-project--dir project))
+    (error "project not specified: %s" project)))
 
 (cl-defstruct (yynt-build (:conc-name yynt-build--)
 			  (:constructor yynt-build--make)
@@ -135,17 +175,17 @@ NAME must be symbol type"
 (cl-defun yynt-create-build (&key type path collect info collect-ex info-ex
 				  fn attrs no-cache-files external-files
 				  included-resources excluded-resources-2)
-  "create `yynt-build' object with `yynt-current-project' as belonged project."
-  (when (not (yynt-project-p yynt-current-project))
-    (error "seems not a valid yynt-project: %s" yynt-current-project))
-  (let* ((project-dir (yynt-project--dir yynt-current-project))
+  "create `yynt-build' object with `yynt--temp-project' as belonged project."
+  (when (not (yynt-project-p yynt--temp-project))
+    (error "seems not a valid yynt-project: %s" yynt--temp-project))
+  (let* ((project-dir (yynt-project--dir yynt--temp-project))
 	 (full-path (expand-file-name path project-dir))
 	 (final-path (if (not (file-directory-p full-path)) full-path
 		       (file-name-as-directory full-path)))
 	 (nocache-hl (let ((ht (make-hash-table :test #'equal)))
 		       (prog1 ht (mapc (lambda (x) (puthash x t ht)) no-cache-files))))
 	 (obj (yynt-build--make
-	       :project yynt-current-project
+	       :project yynt--temp-project
 	       :type type :path final-path
 	       :collect collect :info info
 	       :collect-ex collect-ex :info-ex info-ex
@@ -154,8 +194,8 @@ NAME must be symbol type"
 	       :ext-files external-files
 	       :included-resources included-resources
 	       :excluded-resources-2 excluded-resources-2))
-	 (builds (yynt-project--builds yynt-current-project)))
-    (setf (yynt-project--builds yynt-current-project)
+	 (builds (yynt-project--builds yynt--temp-project)))
+    (setf (yynt-project--builds yynt--temp-project)
 	  (cons obj (cl-remove full-path builds
 			       :test #'string=
 			       :key #'yynt-build--path)))))
