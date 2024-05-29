@@ -7,7 +7,7 @@
 ;; Created: 22 Apr 2024
 
 ;; Package-Version: 0.1
-;; Package-Requires: ((emacs "29.2") (emacsql "3.1"))
+;; Package-Requires: ((emacs "29.2"))
 ;; Keywords: manager
 ;; URL: https://github.com/include-yy/yynt
 
@@ -28,12 +28,11 @@
 
 ;;; Commentary:
 
-
 ;;; Code:
 
 (require 'cl-lib)
 (require 'org)
-(require 'emacsql-sqlite)
+(require 'sqlite)
 
 (defvar yynt-project-list nil
   "list of all yynt project.")
@@ -45,6 +44,12 @@ Set it using `yynt-choose-project'.")
 (defvar yynt--temp-project nil
   "Temporary variable used for the creation phase,
 representing the current project.")
+
+;;; Definition of yynt-project and some helper functions.
+
+(defvar yynt-project-fixed-fields
+  '("build_time" "publish_time")
+  "Inherent fields in the cache database.")
 
 (cl-defstruct (yynt-project (:conc-name yynt-project--)
 			    (:constructor yynt-project--make)
@@ -86,6 +91,9 @@ provided, it will use `default-directory' as the default value."
     (error "not a valid pubdir: %s" pubdir))
   (unless (or (null cache) (and (stringp cache) (not (string-empty-p cache))))
     (error "not a valid cache: %s" cache))
+  (unless (cl-every (lambda (x) (and (stringp x) (not (string-empty-p x))))
+		    cache-items)
+    (error "not a valid cache-items %s" cache-items))
   (unless (or (null directory)
 	      (and (stringp directory)
 		   (not (string-empty-p directory))))
@@ -106,9 +114,14 @@ provided, it will use `default-directory' as the default value."
   ;; Normalization of the cache file path
   (unless (or (null cache) (file-name-absolute-p cache))
     (setq cache (expand-file-name cache directory)))
-  ;; Create Cache file if necessary
-  (when (and (stringp cache) (not (file-exists-p cache)))
-    (with-temp-file cache))
+  ;; ;; Create Cache file if necessary
+  ;; (when (and (stringp cache) (not (file-exists-p cache)))
+  ;;   (with-temp-file cache))
+  ;; Normalization of cache-items, converting all to lowercase
+  (setq cache-items (mapcar #'downcase cache-items))
+  (if (not (null (cl-intersection cache-items yynt-project-fixed-fields)))
+      (error "cache items have same names with fiexd fields")
+    (setq cache-items (append yynt-project-fixed-fields cache-items)))
   ;; Create Project object
   (let ((project (yynt-project--make :name name :dir directory
 				     :pubdir pubdir :cache cache
@@ -145,6 +158,97 @@ If PROJECT is not provided, use `yynt-current-project'."
 			 (yynt-project--dir project))
     (error "project not specified: %s" project)))
 
+(defun yynt-get-file-project-basename (file project)
+  (declare (pure t))
+  (if (not (yynt-in-project-p file project))
+      (error "file %s not in project %s" file project)
+    (let ((dir (yynt-project--dir project)))
+      (substring file (length dir)))))
+
+
+;;; Implementation of the caching functionality.
+
+(defvar yynt--sqlite-obj nil)
+(defun yynt-open-sqlite (file)
+  (sqlite-open file))
+(defun yynt-close-sqlite (obj)
+  (when (sqlitep obj) (sqlite-close obj)))
+(defmacro yynt-with-sqlite (project &rest body)
+  "Open the project's cache file, evaluate the BODY, close the file.
+The value returned is the value of the last form in the body."
+  (declare (indent 1))
+  (let ((proj (gensym)))
+    `(let* ((,proj ,project)
+	    (cache (yynt-project--cache ,proj))
+	    (yynt--sqlite-obj (yynt-open-sqlite cache)))
+       (unwind-protect ,(cons 'progn body)
+	 (yynt-close-sqlite yynt--sqlite-obj)))))
+
+(defun yynt-initialize-cache (project)
+  "Initialize the cache database, creating table if not exist."
+  (let* ((fields (yynt-project--cache-items project)))
+    (yynt-with-sqlite project
+      (if-let* ((info (sqlite-select yynt--sqlite-obj
+				     "PRAGMA table_info(yynt)"))
+		(old-fields (mapcar (lambda (ls) (nth 1 ls)) info)))
+	  (unless (equal fields old-fields)
+	    (let* ((new (mapconcat #'identity fields ","))
+		   (int (mapconcat
+			 #'identity
+			 (cl-intersection fields old-fields :test #'string=)
+			 ",")))
+	      (with-sqlite-transaction yynt--sqlite-obj
+		(sqlite-execute yynt--sqlite-obj "DROP TABLE IF EXISTS temp;")
+		(sqlite-execute
+		 yynt--sqlite-obj
+		 (format "CREATE TABLE temp (path PRIMARY KEY,%s);" new))
+		(sqlite-execute
+		 yynt--sqlite-obj
+		 (format "INSERT INTO temp (path,%s) SELECT path,%s FROM yynt;"
+			 int int))
+		(sqlite-execute yynt--sqlite-obj "DROP TABLE yynt;")
+		(sqlite-execute yynt--sqlite-obj
+				"ALTER TABLE temp RENAME to yynt;"))))
+	(sqlite-execute yynt--sqlite-obj
+			(format "CREATE TABLE yynt (path PRIMARY KEY,%s)"
+				(mapconcat #'identity fields ",")))))))
+
+(defun yynt-clear-cache (project)
+  "Clear the database."
+  (yynt-with-sqlite project
+    (sqlite-execute yynt--sqlite-obj "DELETE FROM yynt;")))
+
+(defun yynt-upsert-cache (project file keys values)
+  "Update or insert a row: update if the file already exists, otherwise
+insert."
+  (let* ((items (yynt-project--cache-items project))
+	 (base (yynt-get-file-project-basename file project))
+	 (k-fields (mapconcat #'identity (cons "path" keys) ","))
+	 (v-fields (mapconcat (lambda (x) (format "'%s'" x))
+			      (cons base values) ","))
+	 (kv-seq (mapconcat (lambda (x) (format "%s='%s'" (car x) (cdr x)))
+			    (cl-mapcar #'cons keys values) ",")))
+    (if (not (cl-subsetp keys items :test #'string=))
+	(error "some keys not belong to cache-items: (%s, %s)"
+	       keys items)
+      (yynt-with-sqlite project
+	(sqlite-execute
+	 yynt--sqlite-obj
+	 (format "\
+INSERT INTO yynt (%s) VALUES (%s)
+ON CONFLICT(path) DO UPDATE SET %s"
+		 k-fields v-fields kv-seq))))))
+
+(defun yynt-delete-cache (project file)
+  "Delete a row"
+  (let ((key (yynt-get-file-project-basename file project)))
+    (yynt-with-sqlite project
+      (sqlite-execute
+       yynt--sqlite-obj
+       "DELETE FROM yynt WHERE path=?" `[,key]))))
+
+
+;;; Definition of yynt-build and some helper functions.
 (cl-defstruct (yynt-build (:conc-name yynt-build--)
 			  (:constructor yynt-build--make)
 			  (:copier nil))
@@ -232,7 +336,7 @@ file may have some constrains (WIP)"
       bobj
     nil))
 
-
+;;; Implementation of the build functionality.
 (defun yynt-export-onefile (bobj file &optional ex force)
   "export one file under BOBJ"
   (unless (file-exists-p file)
@@ -283,7 +387,7 @@ file may have some constrains (WIP)"
   (let ((ext-files (cl-delete-duplicates
 		    (apply #'append (mapcar #'yynt-build--ext-files bobjs))
 		    :test #'equal)))
-    (mapc (lambda (x) (yynt-export-build-object x force t)))
+    (mapc (lambda (x) (yynt-export-build-object x force t)) bobjs)
     (mapc (lambda (x)
 	    (if-let ((obj (yynt-get-file-build x)))
 		(yynt-export-onefile obj x t t)
@@ -313,7 +417,7 @@ If invoked with C-u, force export"
 			 :key (lambda (x) (substring x len)))
 	      (yynt-export-onefile bobj filename t force))
 	     (t (user-error "file seems not a exportable file"))))
-	  (yynt-export-extfile bobj))))))
+	  (yynt-export-extra-files bobj))))))
 
 (defun yynt-get-project-build-relative-path (&optional project)
   "return alist of bobj's relative path name and bobj"
@@ -331,148 +435,10 @@ If invoked with C-u, force export"
 			    (yynt-get-project-build-relative-path))
 		      nil t)
 		     current-prefix-arg))
-  (cond
-   ((eq bobj t)
-    (yynt-export-build-object-list
-     (yynt-project--builds yynt-current-project)))
-   (yynt-export-build-object bobj force)))
-
-
-;;; Caching functions
-;;; taken from ox-publish.el
-(defvar yynt-current-cache nil
-    "This will cache timestamps and titles for files in publishing projects.
-Blocks could hash sha1 values here.")
-
-(defun yynt-write-cache-file (&optional project free-cache)
-  "Write project PROJECT's cache to file
-If FREE-CACHE, empty the cache"
-  (unless yynt-current-cache
-    (error "`yynt-publish-write-chache-file' called, but no cache present"))
-  (unless (or project yynt-current-project)
-    (error "not in any project"))
-  (let* ((project (or project yynt-current-project))
-	 (cache-file (yynt-project--cache project)))
-    (unless cache-file
-      (error "Cannot find cache-file in `yynt-write-cache-file'"))
-    (with-temp-file cache-file
-      (let (print-level print-length)
-	(insert "(setq yynt-current-cache \
-(make-hash-table :test 'equal))")
-	(maphash (lambda (k v)
-		   (insert
-		    (format "(puthash %S %s%S yynt-current-cache)\n"
-			    k (if (or (listp v) (symbolp v)) "'" "") v)))
-		 yynt-current-cache)))
-    (when free-cache (yynt-reset-cache))))
-
-(defun yynt-initialize-cache (project)
-  "Initialize the projects cache if not initialized yet and return it."
-  (unless (yynt-project-p project)
-    (error "Seems not a valid `yynt-project' object: %s" project))
-  (let* ((cache-file (yynt-project--cache project))
-	 (cexists (file-exists-p cache-file)))
-    (when yynt-current-cache (yynt-reset-cache))
-    (if cexists (load-file cache-file)
-      (setq yynt-current-cache
-	    (make-hash-table :test #'equal)))
-    (unless cexists (yynt-write-cache-file project))))
-
-(defun yynt-get-cache (key)
-  "Return the value stored in `org-publish-cache' for key KEY.
-Return nil, if no value or nil is found.  Raise an error if the
-cache does not exist."
-  (unless yynt-current-cache
-    (error "`yynt-get-cache' called, but no cache present"))
-  (gethash key yynt-current-cache))
-
-(defun yynt-set-cache (key value)
-  "Store KEY VALUE pair in `org-publish-cache'.
-Returns value on success, else nil.  Raise an error if the cache
-does not exist."
-  (unless yynt-current-cache
-    (error "`yynt-set-cache' called, but no cache present"))
-  (puthash key value yynt-current-cache))
-
-(defun yynt-reset-cache ()
-  "Empty `yynt-current-cache' and reset it nil."
-  (message "%s" "Resetting org-publish-cache")
-  (when (hash-table-p yynt-current-cache)
-    (clrhash yynt-current-cache))
-  (setq yynt-current-cache nil))
-
-(defun yynt-set-cache-file-property
-    (filename property value &optional project)
-  "Set the VALUE for a PROPERTY of file FILENAME in publishing cache to VALUE.
-If the entry does not exist, it will be created.  Return VALUE."
-  ;; Evtl. load the requested cache file:
-  (when project (yynt-initialize-cache project))
-  (let ((pl (yynt-get-cache filename)))
-    (if pl (progn (plist-put pl property value) value)
-      (yynt-get-cache-file-property
-       filename property value nil project))))
-
-(defun yynt-get-cache-file-property
-    (filename property &optional default no-create project)
-  "Return the value for a PROPERTY of file FILENAME in publishing cache.
-Use cache file of PROJECT-NAME.  Return the value of that PROPERTY,
-or DEFAULT, if the value does not yet exist.  Create the entry,
-if necessary, unless NO-CREATE is non-nil."
-  (when project (org-publish-initialize-cache project))
-  (let ((properties (yynt-get-cache filename)))
-    (cond ((null properties)
-	   (unless no-create
-	     (org-publish-cache-set filename (list property default)))
-	   default)
-	  ((plist-member properties property) (plist-get properties property))
-	  (t default))))
-
-(defun yynt-get-filename-key (filename)
-  "Return path to timestamp file for filename FILENAME."
-  (setq filename (concat filename "::" (or pub-dir "") "::"
-			 (format "%s" (or pub-func ""))))
-  (concat "X" (if (fboundp 'sha1) (sha1 filename) (md5 filename))))
-
-
-(defun yynt-cache-file-needs-publishing (filename)
-  "Check the timestamp of the last publishing of FILENAME.
-Return non-nil if the file needs publishing.  Also check if
-any included files have been more recently published, so that
-the file including them will be republished as well."
-  (unless org-publish-cache
-    (error "`yynt-cache-file-needs-publishing' called, but no cache present"))
-  (let* ((key (yynt-get-filename-key filename))
-	 (pstamp (yynt-get-cache key))
-	 (org-inhibit-startup t)
-	 included-files-mtime)
-    (when (equal (file-name-extension filename) "org")
-      (let ((case-fold-search t))
-	(with-temp-buffer
-          (delay-mode-hooks
-            (org-mode)
-            (insert-file-contents filename)
-	    (goto-char (point-min))
-	    (while (re-search-forward "^[ \t]*#\\+INCLUDE:" nil t)
-	      (let ((element (org-element-at-point)))
-	        (when (eq 'keyword (org-element-type element))
-		  (let* ((value (org-element-property :value element))
-		         (include-filename
-			  (and (string-match "\\`\\(\".+?\"\\|\\S-+\\)" value)
-			       (let ((m (org-strip-quotes
-				         (match-string 1 value))))
-			         ;; Ignore search suffix.
-			         (if (string-match "::.*?\\'" m)
-				     (substring m 0 (match-beginning 0))
-				   m)))))
-		    (when include-filename
-		      (push (org-publish-cache-mtime-of-src
-			     (expand-file-name include-filename (file-name-directory filename)))
-			    included-files-mtime))))))))))
-    (or (null pstamp)
-	(let ((mtime (org-publish-cache-mtime-of-src filename)))
-	  (or (time-less-p pstamp mtime)
-	      (cl-some (lambda (ct) (time-less-p mtime ct))
-		       included-files-mtime))))))
+  (if (eq bobj t)
+      (yynt-export-build-object-list
+       (yynt-project--builds yynt-current-project))
+    (yynt-export-build-object bobj force)))
 
 
 ;;; Utils
