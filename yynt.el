@@ -34,6 +34,17 @@
 (require 'org)
 (require 'sqlite)
 
+(defgroup yynt nil
+  "a simple Org publish manager"
+  :group 'applications)
+
+(defcustom yynt-use-logger t
+  "use logger or not"
+  :type 'boolean)
+
+
+;;; Definition of yynt-project and some helper functions.
+
 (defvar yynt-project-list nil
   "list of all yynt project.")
 (defvar yynt-current-project nil
@@ -44,8 +55,6 @@ Set it using `yynt-choose-project'.")
 (defvar yynt--temp-project nil
   "Temporary variable used for the creation phase,
 representing the current project.")
-
-;;; Definition of yynt-project and some helper functions.
 
 (defvar yynt-project-fixed-fields
   '("build_time" "publish_time")
@@ -272,38 +281,63 @@ ON CONFLICT(path) DO UPDATE SET %s"
   (yynt-with-sqlite project
     (yynt-delete-cache-1 project file)))
 
+(defun yynt-select-cache-1 (project file keys)
+  (sqlite-execute
+   yynt--sqlite-obj
+   (format "SELECT %s FROM yynt where path=%s"
+	   (mapconcat #'identity keys ",")
+	   (yynt-get-file-project-basename file))))
+
+(defun yynt-select-cache (project file keys)
+  (yynt-with-sqlite project
+    (yynt-select-cache-1 project file keys)))
+
+;;; Impl of logger
+(defvar yynt--log-buffer "*yynt*"
+  "buffer for logging")
+(defun yynt--create-log-buffer ()
+  "Create or get log buffer"
+  (let ((buf (get-buffer-create yynt--log-buffer)))
+    (with-current-buffer buf
+      (when (not (equal major-mode 'messages-buffer-mode))
+	(messages-buffer-mode)))
+    buf))
+(defun yynt-log (message &optional no-newline)
+  "Write a log message to buffer named `yynt--log-buffer'"
+  (with-current-buffer (yynt--create-log-buffer)
+    (let ((inhibit-read-only t))
+      (goto-char (point-max))
+      (insert (concat message (if no-newline "" "\n"))))))
+(defun yynt-logger ()
+  "Show logger buffer"
+  (interactive)
+  (switch-to-buffer-other-window (yynt--create-log-buffer)))
 
 ;;; Definition of yynt-build and some helper functions.
 (cl-defstruct (yynt-build (:conc-name yynt-build--)
 			  (:constructor yynt-build--make)
 			  (:copier nil))
   "Struct that contains build info of a series of files"
-  (project nil ; project object that belongs to
-	   :documentation "project object that belongs to")
-  (type 0 ; type of build object
-	:documentation "type of build object. It can be 0, 1 or 2")
-  (path nil ; path to build object
-	:documentation "full path to this build-object")
-  (collect #'ignore ; collect all items
-	   :documentation "function that return list of item need to be built")
-  (info nil ; plist holding contextual information
-	:documentation "plist that pass to export function's ext-plist arg")
-  (collect-ex #'ignore
-	      :documentation "function that collect extra files")
-  (info-ex nil ; additional plist for certain usage.
-	      :documentation "additional plist for certain usage")
-  (fn #'ignore ; actual export function
-      :documentation "Function take arglist (PLIST &optional force)")
-  (attrs nil ; list of meta info needs to be taken from item
-	 :documentation "list of meta info needs to be taken from item")
-  (no-cache-files-ht nil :documentation "hashtable that stores file not need cache")
+  (project nil :documentation "project object that belongs to")
+  (name nil :documentation "name of this build object")
+  (path nil :documentation "full path to this build-object")
+  (type 0 :documentation "type of build object. It can be 0, 1 or 2")
+  (collect #'ignore :documentation "(bobj) => list of files need build")
+  (info nil :documentation "org export info plist")
+  (collect-ex #'ignore :documentation "function that collect extra files")
+  (info-ex nil :documentation "additional info plist")
+  (fn #'ignore :documentation "export funtion (PLIST) -> nil")
+  (attrs nil :documentation "keywords extract from source file")
+  (no-cache-files-ht nil :documentation "files without caching")
   (ext-files nil :documentation "external files depend on this build object")
-  (included-resources nil :documentation "resources need to be exported")
-  (excluded-resources-2 nil :documentation "resource need to be excluded, use for type 2"))
+  (included-resources nil :documentation "resources need to be published")
+  (collect-2 #'ignore :documentation "(bobj) -> list of dir for pub")
+  (excluded-fn-2 nil :documentation "(bobj path) -> list of excluded res"))
 
 (cl-defun yynt-create-build (&key type path collect info collect-ex info-ex
 				  fn attrs no-cache-files external-files
-				  included-resources excluded-resources-2)
+				  included-resources collect-2
+				  excluded-fn-2)
   "create `yynt-build' object with `yynt--temp-project' as belonged project."
   (when (not (yynt-project-p yynt--temp-project))
     (error "seems not a valid yynt-project: %s" yynt--temp-project))
@@ -311,18 +345,17 @@ ON CONFLICT(path) DO UPDATE SET %s"
 	 (full-path (expand-file-name path project-dir))
 	 (final-path (if (not (file-directory-p full-path)) full-path
 		       (file-name-as-directory full-path)))
-	 (nocache-hl (let ((ht (make-hash-table :test #'equal)))
-		       (prog1 ht (mapc (lambda (x) (puthash x t ht)) no-cache-files))))
+	 (ht (let ((ht (make-hash-table :test #'equal)))
+	       (prog1 ht (mapc (lambda (x) (puthash x t ht)) no-cache-files))))
 	 (obj (yynt-build--make
 	       :project yynt--temp-project
-	       :type type :path final-path
+	       :name path :path final-path :type type
 	       :collect collect :info info
 	       :collect-ex collect-ex :info-ex info-ex
-	       :fn fn :attrs attrs
-	       :no-cache-files-ht nocache-hl
+	       :fn fn :attrs attrs :no-cache-files-ht ht
 	       :ext-files external-files
 	       :included-resources included-resources
-	       :excluded-resources-2 excluded-resources-2))
+	       :collect-2 collect-2 :excluded-fn-2 excluded-fn-2))
 	 (builds (yynt-project--builds yynt--temp-project)))
     (setf (yynt-project--builds yynt--temp-project)
 	  (cons obj (cl-remove full-path builds
@@ -337,20 +370,22 @@ file may have some constrains (WIP)"
       (0 (file-equal-p bpath file))
       (1 (file-equal-p bpath (file-name-directory file)))
       (2 (or (file-equal-p bpath (file-name-directory file))
-	     (file-equal-p bpath (file-name-directory (file-name-directory file)))))
+	     (file-equal-p bpath (file-name-directory
+				  (file-name-directory file)))))
       (_ (error "seems not a valid build object type")))))
 
-(defun yynt-no-cache-p (bobj file)
+(defun yynt-file-no-cache-p (bobj file)
   "determine if FILE is in no-cache-files-ht"
-  (let ((ht (yynt-build--no-cache-files-ht bobj))
-	(path (yynt-build--path bobj))
-	(type (yynt-build--type bobj)))
-    (pcase type
-      (0 (gethash (file-name-nondirectory path) ht))
-      ((or 1 2)
-       (let ((name (substring file (length path))))
-	 (gethash name ht)))
-      (_ (error "not a valid build-object type: %s" type)))))
+  (if (not (yynt-project-has-cache-p (yynt-build--project bobj))) nil
+    (let ((ht (yynt-build--no-cache-files-ht bobj))
+	  (path (yynt-build--path bobj))
+	  (type (yynt-build--type bobj)))
+      (pcase type
+	(0 (gethash (file-name-nondirectory path) ht))
+	((or 1 2)
+	 (let ((name (substring file (length path))))
+	   (gethash name ht)))
+	(_ (error "not a valid build-object type: %s" type))))))
 
 (defun yynt-get-file-build (file)
   "get the corresponding build object from filename FILE"
@@ -362,6 +397,17 @@ file may have some constrains (WIP)"
     nil))
 
 ;;; Implementation of the build functionality.
+(defun yynt--do-export (fn file plist)
+  (condition-case-unless-debug nil
+      (prog1 t
+	(if-let ((buf (get-file-buffer file)))
+	    (with-current-buffer buf
+	      (funcall fn plist))
+	  (with-current-buffer (find-file-noselect file)
+	    (unwind-protect (funcall fn info)
+	      (kill-buffer)))))
+    (error nil)))
+
 (defun yynt-export-onefile (bobj file &optional ex force)
   "export one file under BOBJ"
   (unless (file-exists-p file)
@@ -372,12 +418,7 @@ file may have some constrains (WIP)"
 		      (yynt-build--info-ex bobj))
 		(yynt-build--info bobj)))
 	(force (or force (yynt-no-cache-p bobj file))))
-    (if-let ((buf (get-file-buffer file)))
-	(with-current-buffer buf
-	  (funcall fn info force))
-      (with-current-buffer (find-file-noselect file)
-	(unwind-protect (funcall fn info force)
-	  (kill-buffer))))))
+    ...))
 
 (defun yynt-export-extra-files (bobj)
   "export whole build object's external files"
@@ -511,28 +552,6 @@ If FULL is non-nil, return full path."
 	 (res1 (if full (mapcar #'expand-file-name res0) res0)))
     res1))
 
-(defvar yynt--logger "*yynt*"
-  "buffer for logging")
-(defun yynt--create-log-buffer ()
-  "Create or get log buffer"
-  (let ((buf (get-buffer-create yynt--logger)))
-    (with-current-buffer buf
-      (when (not (equal major-mode 'messages-buffer-mode))
-	(messages-buffer-mode)))
-    buf))
-(defun yynt-log (message &optional no-newline switch)
-  "Write a log message to buffer named `yynt--logger'
-
-When called interactively, it shows the log buffer."
-  (interactive "i")
-  (if (called-interactively-p 'interactive)
-      (switch-to-buffer (yynt--create-log-buffer))
-    (with-current-buffer (yynt--create-log-buffer)
-      (let ((inhibit-read-only t))
-	(goto-char (point-max))
-	(insert (concat message (if no-newline "" "\n")))))
-    (when switch
-      (switch-to-buffer (yynt--create-log-buffer)))))
 
 ;; | project-name | pathname | name | type | tag | pub-time | build-time | export-time | export |
 ;;   PRIMARY
