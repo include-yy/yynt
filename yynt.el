@@ -282,11 +282,12 @@ ON CONFLICT(path) DO UPDATE SET %s"
     (yynt-delete-cache-1 project file)))
 
 (defun yynt-select-cache-1 (project file keys)
-  (sqlite-execute
-   yynt--sqlite-obj
-   (format "SELECT %s FROM yynt where path=%s"
-	   (mapconcat #'identity keys ",")
-	   (yynt-get-file-project-basename file))))
+  (car-safe
+   (sqlite-execute
+    yynt--sqlite-obj
+    (format "SELECT %s FROM yynt where path=%s"
+	    (mapconcat #'identity keys ",")
+	    (yynt-get-file-project-basename file)))))
 
 (defun yynt-select-cache (project file keys)
   (yynt-with-sqlite project
@@ -302,12 +303,13 @@ ON CONFLICT(path) DO UPDATE SET %s"
       (when (not (equal major-mode 'messages-buffer-mode))
 	(messages-buffer-mode)))
     buf))
-(defun yynt-log (message &optional no-newline)
+(defun yynt-log (message &optional newline)
   "Write a log message to buffer named `yynt--log-buffer'"
-  (with-current-buffer (yynt--create-log-buffer)
-    (let ((inhibit-read-only t))
-      (goto-char (point-max))
-      (insert (concat message (if no-newline "" "\n"))))))
+  (when yynt-use-logger
+    (with-current-buffer (yynt--create-log-buffer)
+      (let ((inhibit-read-only t))
+	(goto-char (point-max))
+	(insert (concat message (and newline "\n")))))))
 (defun yynt-logger ()
   "Show logger buffer"
   (interactive)
@@ -362,6 +364,20 @@ ON CONFLICT(path) DO UPDATE SET %s"
 			       :test #'string=
 			       :key #'yynt-build--path)))))
 
+(defun yynt-get-file-project-basename (file project)
+  "Get the relative path of a FILE with respect to its PROJECT."
+  (declare (pure t))
+  (if (not (yynt-in-project-p file project))
+      (error "file %s not in project %s" file project)
+    (let ((dir (yynt-project--dir project)))
+      (substring file (length dir)))))
+
+(defun yynt-get-file-build-basename (file bobj)
+  (if (not (yynt-in-build-p bobj file))
+      (error "file %s not in build object %s" file bobj)
+    (let ((dir (yynt-build--path bobj)))
+      (substring file (length dir)))))
+
 (defun yynt-in-build-p (bobj file)
   "determine if File is in BOBJ build object
 file may have some constrains (WIP)"
@@ -387,47 +403,111 @@ file may have some constrains (WIP)"
 	   (gethash name ht)))
 	(_ (error "not a valid build-object type: %s" type))))))
 
-(defun yynt-get-file-build (file)
+(defun yynt-get-file-build-object (file &optional project)
   "get the corresponding build object from filename FILE"
-  (if-let* ((project (cl-find-if (lambda (p) (yynt-in-project-p file p))
-				 yynt-project-list))
+  (if-let* ((project (or project
+			 (cl-find-if
+			  (lambda (p) (yynt-in-project-p file p))
+			  yynt-project-list)))
 	    (bobj (cl-find-if (lambda (b) (yynt-in-build-p file b))
 			      (yynt-project--builds project))))
       bobj
     nil))
 
 ;;; Implementation of the build functionality.
-(defun yynt--do-export (fn file plist)
+(defun yynt-get-org-keywords (infos)
+  "get (keyword . value) alist from the head of FILE
+
+INFOS is a list of keywords, keywords are case-insensitive
+format of keywords is #+KEY: VALUE.
+FILE must be a valid full path.
+
+take from https://github.com/bastibe/org-static-blog"
+  (let ((case-fold-search t)
+	res-key res-val)
+    (save-excursion
+      (dolist (a infos)
+	(goto-char (point-min))
+	(when (search-forward-regexp
+	       (concat "^\\#\\+" a ":[ ]*\\(.+\\)$") 4096 t)
+	  (push a res-key)
+	  (push (match-string 1) res-val))))
+    (cons res-key res-val)))
+
+(defun yynt-get-file-ctime (filepath)
+  "get file's ctime, utc+0"
+  (format-time-string
+   "%Y-%m-%d %T"
+   (nth 5 (file-attributes filepath)) t))
+
+(defun yynt-time-less-p (st1 st2)
+  "tell if st1's time is less than st2,
+time format must be YYYY-MM-DD hh:mm:ss"
+  (time-less-p (date-to-time st1)
+	       (date-to-time st2)))
+
+(defun yynt--export-current-buffer (fn plist)
+  "inner function"
   (condition-case-unless-debug nil
-      (prog1 t
-	(if-let ((buf (get-file-buffer file)))
-	    (with-current-buffer buf
-	      (funcall fn plist))
-	  (with-current-buffer (find-file-noselect file)
-	    (unwind-protect (funcall fn info)
-	      (kill-buffer)))))
+      (prog1 t (funcall fn plist))
     (error nil)))
 
-(defun yynt-export-onefile (bobj file &optional ex force)
+(defun yynt--do-export (bobj plist file &optional force)
+  "export and log, cache"
+  (let* ((project (yynt-build--project bobj))
+	 (basename (yynt-get-file-project-basename file project))
+	 (project-name (yynt-project--name project))
+	 (build-name (yynt-build--name bobj))
+	 (attrs (yynt-build--attrs bobj))
+	 (fn (yynt-build--fn bobj)))
+    (yynt-log (format "[%s → %s] %s exporting... "
+		      project-name build-name basename))
+    (if (yynt-file-no-cache-p bobj file)
+	(let ((buf0 (get-file-buffer file))
+	      (buf (if buf0 buf0 (find-file-noselect file))))
+	  (with-current-buffer buf
+	    (unwind-protect
+		(if (yynt--export-current-buffer fn plist)
+		    (yynt-log "ok" t) (yynt-log "fail" t))
+	      (unless buf0 (kill-buffer)))))
+      (let ((btime (or (car (yynt-select-cache-1
+			     project file '("build_time")))
+		       "1900-01-01 00:00"))
+	    (ctime (yynt-get-file-ctime file)))
+	(if (and (not force) (yynt-time-less-p ctime btime))
+	    (yynt-log "skip" t)
+	  (let* ((buf0 (get-file-buffer file))
+		 (buf (if buf0 buf0 (find-file-noselect file))))
+	    (with-current-buffer buf
+	      (unwind-protect
+		  (let* ((props (yynt-get-org-keywords attrs))
+			 (res (yynt--export-current-buffer fn plist))
+			 (time (format-time-string
+				"%Y-%m-%d %T" (current-time) t)))
+		    (if (not res) (yynt-log "fail" t)
+		      (yynt-upsert-cache
+		       project file
+		       (cons "build_time" (car props))
+		       (cons time (cdr props)))))
+		(unless buf0 (kill-buffer))))))))))
+
+(defun yynt-export-files (bobj files &optional ex force)
   "export one file under BOBJ"
-  (unless (file-exists-p file)
-    (error "file not exists: %s" file))
-  (let ((fn (yynt-build--fn bobj))
-	(info (if ex (org-combine-plists
+  (let ((info (if ex (org-combine-plists
 		      (yynt-build--info bobj)
 		      (yynt-build--info-ex bobj))
-		(yynt-build--info bobj)))
-	(force (or force (yynt-no-cache-p bobj file))))
-    ...))
+		(yynt-build--info bobj))))
+    (dolist (f files)
+      (yynt--do-export bobj info file force))))
 
-(defun yynt-export-extra-files (bobj)
+(defun yynt-export-extra-files (project files)
   "export whole build object's external files"
-  (let* ((extfiles (yynt-build--ext-files bobj))
-	 (base-path (yynt-project--dir (yynt-build--project bobj)))
-	 (full-files (mapcar (lambda (x) (file-name-concat base-path x)) extfiles)))
+  (let* ((base-path (yynt-project--dir project))
+	 (full-files (mapcar (lambda (x) (file-name-concat base-path x))
+			     files)))
     (mapc (lambda (x)
-	    (if-let ((obj (yynt-get-file-build x)))
-		(yynt-export-onefile obj x t t)
+	    (if-let ((obj (yynt-get-file-build-object x project)))
+		(yynt-export-files obj (list x) t t)
 	      (error "file %s not belongs to any build object" x)))
 	  full-files)))
 
@@ -436,29 +516,30 @@ file may have some constrains (WIP)"
   (let ((type (yynt-build--type bobj)))
     (pcase type
       (0 (let ((file (yynt-build--path bobj)))
-	   (yynt-export-onefile bobj file nil force)))
+	   (yynt-export-files bobj (list file) nil force)))
       ((or 1 2)
        (let* ((co-fn (yynt-build--collect bobj))
 	      (co-fn-ex (yynt-build--collect-ex bobj))
 	      (files-1 (funcall co-fn bobj))
 	      (files-2 (funcall co-fn-ex bobj)))
-	 (mapc (lambda (x) (yynt-export-onefile bobj x nil force)) files-1)
-	 (mapc (lambda (x) (yynt-export-onefile bobj x t force)) files-2)))
+	 (yynt-export-files bobj files-1 nil force)
+	 (yynt-export-files bobj files-2 t force)))
       (_ (error "not a valid build object type: %s" type)))
     (unless noexternal
-      (yynt-export-extra-files bobj))))
+      (yynt-export-extra-files
+       (yynt-build--project bobj)
+       (yynt-build--ext-files bobj)))))
 
 (defun yynt-export-build-object-list (bobjs &optional force)
   "export a list of build object"
-  (let ((ext-files (cl-delete-duplicates
-		    (apply #'append (mapcar #'yynt-build--ext-files bobjs))
-		    :test #'equal)))
-    (mapc (lambda (x) (yynt-export-build-object x force t)) bobjs)
-    (mapc (lambda (x)
-	    (if-let ((obj (yynt-get-file-build x)))
-		(yynt-export-onefile obj x t t)
-	      (error "file %s not belong to any build object" x)))
-	  ext-files)))
+  (when bobjs
+    (let ((ext-files (cl-delete-duplicates
+		      (apply #'append
+			     (mapcar #'yynt-build--ext-files bobjs))
+		      :test #'equal)))
+      (dolist (b bobjs) (yynt-export-build-object b force))
+      (yynt-export-extra-files (yynt-build--project (car bobjs))
+			       ext-files))))
 
 (defun yynt-export-file (filename &optional force)
   "User Command, export current buffer
@@ -468,22 +549,22 @@ If invoked with C-u, force export"
   (interactive (list (buffer-file-name) current-prefix-arg))
   (if (null filename)
       (user-error "buffer seems not have `buffer-file-name'")
-    (let ((bobj (yynt-get-file-build filename)))
+    (let ((bobj (yynt-get-file-build-object filename)))
       (if (null bobj)
 	  (user-error "file %s seems not belong to one build object" filename)
 	(if (eq 0 (yynt-build--type bobj))
-	    (yynt-export-onefile bobj filename nil force)
-	  (let* ((len (length (yynt-build--path bobj)))
-		 (basename (substring filename len)))
+	    (yynt-export-build-object bobj force)
+	  (let* ((len (yynt-build--path bobj))
+		 (basename (yynt-get-file-build-basename filename bobj)))
 	    (cond
 	     ((cl-member basename (funcall (yynt-build--collect bobj) bobj)
 			 :key (lambda (x) (substring x len)))
-	      (yynt-export-onefile bobj filename nil force))
+	      (yynt-export-files bobj (list filename) nil force))
 	     ((cl-member basename (funcall (yynt-build--collect-ex bobj) bobj)
 			 :key (lambda (x) (substring x len)))
-	      (yynt-export-onefile bobj filename t force))
+	      (yynt-export-files bobj (list filename) t force))
 	     (t (user-error "file seems not a exportable file"))))
-	  (yynt-export-extra-files bobj))))))
+	  (yynt-export-extra-files project (yynt-build--ext-files bobj)))))))
 
 (defun yynt-get-project-build-relative-path (&optional project)
   "return alist of bobj's relative path name and bobj"
@@ -493,12 +574,14 @@ If invoked with C-u, force export"
     (mapcar (lambda (x) (cons (substring (yynt-build--path x) len) x))
 	    bobjs)))
 
-(defun yynt-export-buildobj (bobj &optional force)
+(defun yynt-export-build (bobj &optional force)
   "User Command, export selected build object"
   (interactive (list (completing-read
 		      "Select a build object:> "
 		      (cons '("t" . t)
-			    (yynt-get-project-build-relative-path))
+			    (mapcar (lambda (x) (cons (yynt-build--name x) x))
+				    (yynt-project--builds
+				     yynt-current-project)))
 		      nil t)
 		     current-prefix-arg))
   (if (eq bobj t)
@@ -508,28 +591,6 @@ If invoked with C-u, force export"
 
 
 ;;; Utils
-
-(defun yynt-get-org-keywords (file infos)
-  "get (keyword . value) alist from the head of FILE
-
-INFOS is a list of keywords, keywords are case-insensitive
-format of keywords is #+KEY: VALUE.
-FILE must be a valid full path.
-
-take from https://github.com/bastibe/org-static-blog"
-  (if (not (file-exists-p file))
-      (error "yynt: file not exists: %s" file)
-
-    (let ((case-fold-search t))
-      (with-temp-buffer
-	(insert-file-contents file nil 0 4096)
-	(let (res)
-	  (dolist (a infos)
-	    (goto-char (point-min))
-	    (when (search-forward-regexp
-		   (concat "^\\#\\+" a ":[ ]*\\(.+\\)$") nil t)
-	      (push (cons a (match-string 1)) res)))
-	  res)))))
 
 (defun yynt-directory-files (dir &optional full)
   (directory-files dir full directory-files-no-dot-files-regexp))
@@ -552,13 +613,6 @@ If FULL is non-nil, return full path."
 	 (res1 (if full (mapcar #'expand-file-name res0) res0)))
     res1))
 
-
-;; | project-name | pathname | name | type | tag | pub-time | build-time | export-time | export |
-;;   PRIMARY
-
-;; Consider using ox-publish.el's cache and emacs's builtin SQLite3 support, and prefer the latter.
-;; I need a uniform interface for caching build time and something else.
-;; Caching migrated from ox-publish.el is not completed.
 
 (provide 'yynt)
 ;;; yynt.el ends here
