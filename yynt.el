@@ -312,13 +312,14 @@ ON CONFLICT(path) DO UPDATE SET %s"
   (attrs nil :documentation "keywords extract from source file")
   (no-cache-files-ht nil :documentation "files without caching")
   (ext-files nil :documentation "external files depend on this build object")
-  (included-resources nil :documentation "resources need to be published")
+  (convert-fn nil :documentation "convert input file to output file name")
+  (included-resources nil :documentation "resources to be published")
   (collect-2 #'ignore :documentation "(bobj) -> list of dir for pub")
-  (excluded-fn-2 nil :documentation "(bobj path) -> list of excluded res"))
+  (excluded-fn-2 nil :documentation "(bobj path) -> excluded pred"))
 
 (cl-defun yynt-create-build (&key type path collect info collect-ex info-ex
 				  fn attrs no-cache-files external-files
-				  included-resources collect-2
+				  convert-fn included-resources collect-2
 				  excluded-fn-2)
   "create `yynt-build' object with `yynt--temp-project' as belonged project."
   (when (not (yynt-project-p yynt--temp-project))
@@ -336,6 +337,7 @@ ON CONFLICT(path) DO UPDATE SET %s"
 	       :collect-ex collect-ex :info-ex info-ex
 	       :fn fn :attrs attrs :no-cache-files-ht ht
 	       :ext-files external-files
+	       :convert-fn convert-fn
 	       :included-resources included-resources
 	       :collect-2 collect-2 :excluded-fn-2 excluded-fn-2))
 	 (builds (yynt-project--builds yynt--temp-project)))
@@ -613,23 +615,188 @@ If invoked with C-u, force export"
 
 (defun yynt-publish-attachment (bobj file)
   "See `org-publish-attachment'"
-  (let* ((project (yynt-build--project bobj))
-	 (project-dir (yynt-project--dir project))
-	 (rela-name (yynt-get-file-project-basename file project))
-	 (rela-dir (file-name-directory rela-name))
-	 (new-dir (file-name-concat project-dir rela-dir))
-	 (new-name (file-name-concat project-dir rela-name)))
-    (unless (file-directory-p new-dir)
-      (make-directory new-dir t))
-    (copy-file file new-name t)))
+  (condition-case-unless-debug nil
+      (let* ((project (yynt-build--project bobj))
+	     (project-dir (yynt-project--dir project))
+	     (rela-name (yynt-get-file-project-basename file project))
+	     (rela-dir (file-name-directory rela-name))
+	     (new-dir (file-name-concat project-dir rela-dir))
+	     (new-name (file-name-concat project-dir rela-name)))
+	(unless (file-directory-p new-dir)
+	  (make-directory new-dir t))
+	(copy-file file new-name t)
+	t)
+    (error nil)))
 
+(defun yynt-publish-attach-cached (bobj file &optional force)
+  "todo, add logger"
+  (let ((project (yynt-build--project bobj)))
+    (when (and (file-exists-p file)
+	       (yynt-in-project-p file project))
+      (if (yynt-file-no-cache-p bobj file)
+	  (yynt-publish-attachment bobj file)
+	(if-let ((ptime (car (yynt-select-cache-1 project file
+						  '("publish_time"))))
+		 (ctime (yynt-get-file-ctime file)))
+	    (when (or force (yynt-time-less-p ptime ctime))
+	      (when (yynt-publish-attachment bobj file)
+		(yynt-upsert-cache-1 project file '("publish_time")
+				     (list
+				      (format-time-string
+				       "%Y-%m-%d %T" (current-time) t)))))
+	  (prog1 (yynt-publish-attachment bobj file)
+	    (yynt-upsert-cache-1 project file '("publish_time")
+				 (list
+				  (format-time-string
+				   "%Y-%m-%d %T" (current-time) t)))))))))
 
+(defun yynt-publish-attach-dir-cached (bobj dir &optional force)
+  (when (file-exists-p dir)
+    (mapc (lambda (x) (yynt-publish-attach-cached bobj x force))
+	  (directory-files-recursively
+	   dir ".*"))))
 
-
-;;; Utils
+(defun yynt-publish-attach-cached (bobj ls &optional force)
+  (mapc (lambda (x)
+	  (if (file-directory-p x)
+	      (yynt-publish-attach-dir-cached bobj x force)
+	    (yynt-publish-attach-cached bobj x force)))
+	ls))
 
 (defun yynt-directory-files (dir &optional full)
   (directory-files dir full directory-files-no-dot-files-regexp))
+
+(defun yynt-publish-build-object (bobj &optional force noexternal)
+  "build and publish contents"
+  (yynt-export-build-object bobj force noexternal)
+  (let ((type (yynt-build--type bobj))
+	(co-fn (yynt-build--convert-fn bobj)))
+    (pcase type
+      (0 (yynt-publish-attach-cached
+	  bobj
+	  (cons (funcall co-fn (yynt-build--path bobj))
+		(yynt-build--included-resources bobj))))
+      (1 (let* ((files (append (funcall (yynt-build--collect bobj) bobj)
+			       (funcall (yynt-build--collect-ex bobj) bobj)))
+		(outfiles (mapcar co-fn files))
+		(final (append files (yynt-build--included-resources bobj))))
+	   (yynt-publish-attach-cached bobj final force)))
+      (2 (let* ((files (funcall (yynt-build--collect-ex bobj)))
+		(outfiles (mapcar co-fn files)))
+	   (yynt-publish-attach-cached bobj outfiles force)
+	   (let* ((dirs (funcall (yynt-build--collect-2 bobj) bobj))
+		  (excl-fn (yynt-build--excluded-fn-2 bobj)))
+	     (dolist (d dirs)
+	       (let* ((pred (funcall excl-fn bobj d))
+		      (files (yynt-directory-files d t))
+		      (final (cl-remove-if pred files)))
+		 (yynt-publish-attach-cached bobj final force)))))))
+    (unless noexternal
+      (let* ((ext-files (yynt-build--ext-files bobj))
+	     (project (yynt-build--project bobj))
+	     (files (mapcar (lambda (x) (file-name-concat
+				     (yynt-project--dir project) x))
+			    ext-files)))
+	(yynt-publish-attach-cached bobj files force)))))
+
+(defun yynt-export-build-object-list (bobjs &optional force)
+  "export a list of build object"
+  (when bobjs
+    (let ((ext-files (cl-delete-duplicates
+		      (apply #'append
+			     (mapcar #'yynt-build--ext-files bobjs))
+		      :test #'equal)))
+      (dolist (b bobjs) (yynt-export-build-object b force))
+      (yynt-export-extra-files (yynt-build--project (car bobjs))
+			       ext-files))))
+
+(defun yynt-publish-build-object-list (bobjs &optional force)
+  "build and publish build objects"
+  (let ((ext-files (cl-delete-duplicates
+		      (apply #'append
+			     (mapcar #'yynt-build--ext-files bobjs))
+		      :test #'equal)))
+    (yynt-export-build-object-list bobjs force)
+    (yynt-publish-attach-cached
+     bobj
+     (mapcar (lambda (x) (file-name-concat
+		      (yynt-project--dir (yynt-build--project (car bobjs))) x))
+	     ext-files))))
+
+(defun yynt-publish-build (a &optional force)
+  "[need rewrite]
+publish a build object, user command.
+take from yynt2.el"
+  (interactive (list (completing-read
+		      "Select a project:>"
+		      (append '("t" "glb")
+			      (mapcar (lambda (x)
+					(oref x root))
+				      (hash-table-keys
+				       (oref-default yynt-publish hash)))))
+		     current-prefix-arg))
+  (let ((start-time (float-time)))
+    (cond
+     ((string= a "t")
+      (yynt-publish-pub-all-project force)
+      (message "publish project [%s] in %ss"
+	       a (- (float-time) start-time)))
+     ((string= a "glb")
+      (yynt-publish-pub-global-resources force)
+      (message "publish project [%s] in %ss"
+	       a (- (float-time) start-time)))
+     ((member a (mapcar (lambda (x) (oref x root))
+			(hash-table-keys (oref-default yynt-publish hash))))
+      (let ((obj (yynt-publish-name2obj a)))
+	(yynt-publish-pub-project obj force)
+	(message "publish project [%s] in %ss"
+		 a (- (float-time) start-time))))
+     (t (message "seems not a project...")))))
+
+(defun yynt-publish-pub-file (pobj file &optional force)
+  "function that publish certain file
+take from yynt2.el, need rewrite"
+  (when-let* ((bobj (oref pobj build))
+	      (type (oref bobj type))
+	      (files (cond
+		      ((member file (yynt-build-get-sumfiles bobj)) (list file))
+		      ((member file (funcall (oref bobj gather-fn)))
+		       (append (list file)
+			       (yynt-build-get-sumfiles bobj)
+			       (car (yynt-build-get-contfiles (list bobj)))))
+		      (t nil)))
+	      (outfiles (mapcar (lambda (x)
+				  (if (string= "org" (file-name-extension x))
+				      (yynt-fswap-ext x "html")
+				    x))
+				files))
+	      (res (append (mapcar 'yynt-get-fullpath (oref pobj resource))
+			   (and (= type 2)
+				(not (string= (yynt-fdir file)
+					      (yynt-fjoin yynt-basedir
+							  (oref bobj root))))
+				(list (yynt-fdir file)))
+			   outfiles)))
+    (prog1 t (print res)
+	   (yynt-publish-reslist-cached res (oref pobj exreg) force))))
+
+(defun yynt-publish-file (file &optional force)
+  "user commnad, publish one file
+take form yynt2.el, need rewrite."
+  (interactive (list (buffer-file-name) current-prefix-arg))
+  (let ((pobj (yynt-publish-path2obj file)))
+    (if (not pobj)
+	(message "file not belongs to any publish project")
+      (let ((start-time (float-time)))
+	(yynt-build-gen-file (oref pobj build) file force)
+	(if (yynt-publish-pub-file pobj file force)
+	    (message (format "publish file in [%s] fin in %ss"
+			     (oref (oref pobj build) root)
+			     (- (float-time) start-time)))
+	  (message "publish not success, maybe not a base/sum file"))))))
+
+
+;;; Utils
 
 (defun yynt-filter-dir-items (pred &optional dir full)
   "return a list of subdirs under DIR that satisfy PRED.
