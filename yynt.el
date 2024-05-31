@@ -295,28 +295,6 @@ ON CONFLICT(path) DO UPDATE SET %s"
   (yynt-with-sqlite project
     (yynt-select-cache-1 project file keys)))
 
-;;; Impl of logger
-(defvar yynt--log-buffer "*yynt*"
-  "buffer for logging")
-(defun yynt--create-log-buffer ()
-  "Create or get log buffer"
-  (let ((buf (get-buffer-create yynt--log-buffer)))
-    (with-current-buffer buf
-      (when (not (equal major-mode 'messages-buffer-mode))
-	(messages-buffer-mode)))
-    buf))
-(defun yynt-log (message &optional newline)
-  "Write a log message to buffer named `yynt--log-buffer'"
-  (when yynt-use-logger
-    (with-current-buffer (yynt--create-log-buffer)
-      (let ((inhibit-read-only t))
-	(goto-char (point-max))
-	(insert (concat message (and newline "\n")))))))
-(defun yynt-logger ()
-  "Show logger buffer"
-  (interactive)
-  (switch-to-buffer-other-window (yynt--create-log-buffer)))
-
 ;;; Definition of yynt-build and some helper functions.
 (cl-defstruct (yynt-build (:conc-name yynt-build--)
 			  (:constructor yynt-build--make)
@@ -417,6 +395,28 @@ file may have some constrains (WIP)"
     nil))
 
 ;;; Implementation of the build functionality.
+
+;; logger
+(defvar yynt--log-buffer "*yynt*"
+  "buffer for logging")
+(defun yynt--create-log-buffer ()
+  "Create or get log buffer"
+  (let ((buf (get-buffer-create yynt--log-buffer)))
+    (with-current-buffer buf
+      (when (not (equal major-mode 'messages-buffer-mode))
+	(messages-buffer-mode)))
+    buf))
+(defun yynt-log (message &optional newline)
+  "Write a log message to buffer named `yynt--log-buffer'"
+  (when yynt-use-logger
+    (with-current-buffer (yynt--create-log-buffer)
+      (let ((inhibit-read-only t))
+	(goto-char (point-max))
+	(insert (concat message (and newline "\n")))))))
+(defun yynt-logger ()
+  "Show logger buffer"
+  (interactive)
+  (switch-to-buffer-other-window (yynt--create-log-buffer)))
 
 (defun yynt-combine-plists (&rest plists)
   "Create a single property list from all plists in PLISTS.
@@ -607,6 +607,23 @@ If invoked with C-u, force export"
       (yynt-export-build-object-list
        (yynt-project--builds yynt-current-project))
     (yynt-export-build-object bobj force)))
+
+
+;;; Impl of publisher
+
+(defun yynt-publish-attachment (bobj file)
+  "See `org-publish-attachment'"
+  (let* ((project (yynt-build--project bobj))
+	 (project-dir (yynt-project--dir project))
+	 (rela-name (yynt-get-file-project-basename file project))
+	 (rela-dir (file-name-directory rela-name))
+	 (new-dir (file-name-concat project-dir rela-dir))
+	 (new-name (file-name-concat project-dir rela-name)))
+    (unless (file-directory-p new-dir)
+      (make-directory new-dir t))
+    (copy-file file new-name t)))
+
+
 
 
 ;;; Utils
