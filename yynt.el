@@ -31,8 +31,10 @@
 ;;; Code:
 
 (require 'cl-lib)
-(require 'org)
 (require 'sqlite)
+
+(unless (sqlite-available-p)
+  (error "Please ensure your emacs supports builtin sqlite utilities"))
 
 (defgroup yynt nil
   "a simple Org publish manager"
@@ -56,7 +58,7 @@ Set it using `yynt-choose-project'.")
   "Temporary variable used for the creation phase,
 representing the current project.")
 
-(defvar yynt-project-fixed-fields
+(defconst yynt-project-fixed-fields
   '("build_time" "publish_time")
   "Inherent fields in the cache database.")
 
@@ -415,6 +417,23 @@ file may have some constrains (WIP)"
     nil))
 
 ;;; Implementation of the build functionality.
+
+(defun yynt-combine-plists (&rest plists)
+  "Create a single property list from all plists in PLISTS.
+The process starts by copying the first list, and then setting properties
+from the other lists.  Settings in the last list are the most significant
+ones and overrule settings in the other lists.
+
+Copied from `org-combine-plists'"
+  (let ((rtn (copy-sequence (pop plists)))
+	p v ls)
+    (while plists
+      (setq ls (pop plists))
+      (while ls
+	(setq p (pop ls) v (pop ls))
+	(setq rtn (plist-put rtn p v))))
+    rtn))
+
 (defun yynt-get-org-keywords (infos)
   "get (keyword . value) alist from the head of FILE
 
@@ -493,7 +512,7 @@ time format must be YYYY-MM-DD hh:mm:ss"
 
 (defun yynt-export-files (bobj files &optional ex force)
   "export one file under BOBJ"
-  (let ((info (if ex (org-combine-plists
+  (let ((info (if ex (yynt-combine-plists
 		      (yynt-build--info bobj)
 		      (yynt-build--info-ex bobj))
 		(yynt-build--info bobj))))
