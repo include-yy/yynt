@@ -96,6 +96,15 @@ From `org-string-nw-p'."
        (string-match-p "[A-Za-z][0-9A-Za-z_]*" s)
        (not (member s (cons "path" yynt-project-fixed-fields)))))
 
+(defun yynt--valid-filename-p (file)
+  "Determine if FILE is a valid path string"
+  (and (yynt--string-nw-p file)
+       (not (string-match-p file-name-invalid-regexp file))))
+
+(defun yynt--valid-rela-filename-p (file)
+  (and (yynt--valid-filename-p s)
+       (not (string-match-p "^/" s))))
+
 (defun yynt-create-project (name pubdir cache cache-items &optional directory)
   "Create a new `yynt-project' object.
 
@@ -122,13 +131,13 @@ provided, it will use `default-directory' as the default value."
   ;; Check arguments
   (when (or (not (symbolp name)) (null name) (keywordp name))
     (error "not a valid project name: %s" name))
-  (unless (yynt--string-nw-p pubdir)
+  (unless (yynt--valid-filename-p pubdir)
     (error "not a valid pubdir: %s" pubdir))
-  (unless (or (null cache) (yynt--string-nw-p cache))
+  (unless (or (null cache) (yynt--valid-filename-p cache))
     (error "not a valid cache: %s" cache))
   (unless (cl-every #'yynt--cache-item-p cache-items)
     (error "not a valid cache-items %s" cache-items))
-  (unless (or (null directory) (yynt--string-nw-p directory))
+  (unless (or (null directory) (yynt--valid-filename-p directory))
     (error "directory's type is not correct: %s" directory))
   ;; Normalization of the directory
   (cond
@@ -167,7 +176,8 @@ provided, it will use `default-directory' as the default value."
     ;; Initialize cache if necessary
     (when cache
       (yynt-initialize-cache project))
-    (setq yynt--temp-project project)))
+    (setq yynt--temp-project project)
+    project))
 
 (defun yynt-choose-project (name)
   "Interactively select one from the existing project objects as the
@@ -346,8 +356,6 @@ Ensure that `yynt--sqlite-obj' belongs to the PROJECT."
 
 ;;; Definition of yynt-build and some helper functions.
 
-;; TODO: Consider a more rigorous yynt-create-build.
-
 (cl-defstruct (yynt-build (:conc-name yynt-build--)
 			  (:constructor yynt-build--make)
 			  (:copier nil))
@@ -437,78 +445,99 @@ be published."
   (unless project (setq project yynt--temp-project))
   (unless (not (yynt-project-p project))
     (error "seems not a valid yynt-project: %s" project))
-  (unless (<= 0 type 2)
+  (unless (and (integerp type) (<= 0 type 2))
     (error "seems not a valid yynt-object type: %s" type))
   ;; TODO: Maybe we need a function to test if string is a valid path.
   ;; This also applies to other file check validation.
-  (when (string-match-p "^/" path)
-    (error "seems not a valid relative pathname"))
-  (unless (functionp collect)
+  (unless (and (yynt--valid-rela-filename-p path)
+	       (file-exists-p (file-name-concat
+			       (yynt-project--dir project)
+			       path)))
+    (error "path not valid or not exist: %s" path))
+  (unless (or (eq type 0) (functionp collect))
     (error "not a valid collect function: %s" collect))
   (unless (plistp info)
     (error "not a valid info plist: %s" info))
-  (unless (functionp collect-ex)
+  (unless (or (eq type 0) (functionp collect-ex))
     (error "not a valid collect-ex function: %s" collect-ex))
-  (unless (plistp info-ex)
+  (unless (or (eq type 0) (plistp info-ex))
     (error "not a valid info-ex plist: %s" info-ex))
   (unless (functionp fn)
     (error "not a valid export function: %s" fn))
   (unless (and (cl-every #'yynt--cache-item-p attrs)
 	       (cl-subsetp attrs (yynt-project--cache-items project)))
     (error "not a valid attrs"))
-  (unless (or (eq t no-cache-files)
-	      (cl-every #'stringp no-cache-files))
+  (unless (or (and (eq type 0) (eq no-cache-files t))
+	      (cl-every #'yynt--valid-rela-filename-p no-cache-files))
     (error "not a valid no-cache-file list: %s" no-cache-files))
-  (unless (cl-every #'stringp ext-files)
+  (unless (cl-every #'yynt--valid-rela-filename-p ext-files)
     (error "not a valid external file list: %s" ext-files))
   (unless (functionp convert-fn)
     (error "not a valid convert-fn: %s" convert-fn))
-  (unless (cl-every #'stringp included-resources)
+  (unless (cl-every #'yynt--valid-rela-filename-p included-resources)
     (error "not a valid included-resources: %s" included-resources))
-  (unless (functionp collect-2)
+  (unless (and (eq type 2) (functionp collect-2))
     (error "not a valid collect-2 function: %s" collect-2))
-  (unless (functionp excluded-fn-2)
+  (unless (and (eq type 2) (functionp excluded-fn-2))
     (error "not a valid excluded-fn-2 function: %s" excluded-fn-2))
   (let* ((project-dir (yynt-project--dir project))
 	 (full-path (expand-file-name path project-dir))
 	 (final-path (if (not (file-directory-p full-path)) full-path
 		       (file-name-as-directory full-path)))
+	 (name (if (not (file-directory-p final-path)) path
+		   (directory-file-name path)))
 	 (ht (let ((ht (make-hash-table :test #'equal)))
 	       (if (eq type 0) ; type 0 just check itself
 		   (if (null no-cache-files) ht
 		     (prog1 ht (puthash path t ht)))
 		 (prog1 ht (mapc (lambda (x) (puthash x t ht)) no-cache-files)))))
-	 (obj (yynt-build--make
-	       :project project
-	       :name path :path final-path :type type
-	       :collect collect :info info
-	       :collect-ex collect-ex :info-ex info-ex
-	       :fn fn :attrs attrs :no-cache-files-ht ht
-	       :ext-files ext-files
-	       :published published :convert-fn convert-fn
-	       :included-resources included-resources
-	       :collect-2 collect-2 :excluded-fn-2 excluded-fn-2))
-	 (builds (yynt-project--builds yynt--temp-project)))
-    (setf (yynt-project--builds yynt--temp-project)
-	  (cons obj (cl-remove full-path builds
-			       :test #'string=
-			       :key #'yynt-build--path)))))
+	 ;; generate a collect function for type-0
+	 (collect (if (not (and (eq type 0) (null collect))) collect
+		      (lambda (_bobj) final-path)))
+	 ;; translate include-resources to full path
+	 ;; note for type-0 build object, we use project's dir as base dir
+	 (i-res (if (eq type 0)
+		    (mapcar (lambda (x) (yynt-get-file-project-fullname x project))
+			    included-resources)
+		  (mapcar (lambda (x) (file-name-concat final-path x))
+			  included-resources))))
+    (unless (cl-every #'file-exists-p i-res)
+      (error "seems some resources not exist: %s" i-res))
+    (let ((obj (yynt-build--make
+		:project project
+		:name name :path final-path :type type
+		:collect collect :info info
+		:collect-ex collect-ex :info-ex info-ex
+		:fn fn :attrs attrs :no-cache-files-ht ht
+		:ext-files ext-files
+		:published published :convert-fn convert-fn
+		:included-resources i-res
+		:collect-2 collect-2 :excluded-fn-2 excluded-fn-2))
+	  (builds (yynt-project--builds project)))
+      (setf (yynt-project--builds project)
+	    (cons obj (cl-remove full-path builds
+				 :test #'string=
+				 :key #'yynt-build--path)))
+      obj)))
 
 (defun yynt-get-file-build-basename (file bobj)
+  "Get the relative path of FILE with respect to its BOBJ's base directory."
   ;; TODO: consider remove this validation step.
-  ;; also, clearify that this function only used for type 2 and 3
+  ;; clearify that this function only used for type 2 and 3
   (if (not (yynt-in-build-p bobj file))
       (error "file %s not in build object %s" file bobj)
     (let ((dir (yynt-build--path bobj)))
       (substring file (length dir)))))
 
 (defun yynt-get-file-build-fullname (file bobj)
+  "Get the full path of FILE under BOBJ."
   (let ((dir (yynt-build--path bobj)))
     (file-name-concat dir file)))
 
 (defun yynt-in-build-p (bobj file)
-  "determine if File is in BOBJ build object
-file may have some constrains (WIP)"
+  "Determine if FILE is located within BOBJ.
+
+Used only for files that need to be exported."
   (let ((bpath (yynt-build--path bobj)))
     (pcase (yynt-build--type bobj)
       (0 (file-equal-p bpath file))
@@ -519,20 +548,25 @@ file may have some constrains (WIP)"
       (_ (error "seems not a valid build object type")))))
 
 (defun yynt-file-no-cache-p (bobj file)
-  "determine if FILE is in no-cache-files-ht"
+  "Determine if FILE is in no-cache-files-ht.
+
+For type 0, the FILE parameter is not mandatory."
   (if (not (yynt-project-has-cache-p (yynt-build--project bobj))) nil
     (let ((ht (yynt-build--no-cache-files-ht bobj))
 	  (path (yynt-build--path bobj))
 	  (type (yynt-build--type bobj)))
       (pcase type
-	(0 (gethash (file-name-nondirectory path) ht))
+	(0 (gethash (yynt-get-file-project-basename path) ht))
 	((or 1 2)
-	 (let ((name (substring file (length path))))
+	 (let ((name (yynt-get-file-build-basename file bobj)))
 	   (gethash name ht)))
 	(_ (error "not a valid build-object type: %s" type))))))
 
 (defun yynt-get-file-build-object (file &optional project)
-  "get the corresponding build object from filename FILE"
+  "Get the corresponding build object based on FILE.
+
+If the PROJECT parameter is not provided, `yynt-current-project'
+will be used as the project for lookup."
   (if-let* ((project (or project
 			 (cl-find-if
 			  (lambda (p) (yynt-in-project-p file p))
