@@ -41,7 +41,9 @@
   :group 'applications)
 
 (defcustom yynt-use-logger t
-  "use logger or not"
+  "Use logger or not.
+
+The logger will be used to output export messages and file publish messages."
   :type 'boolean)
 
 
@@ -59,7 +61,7 @@ Set it using `yynt-choose-project'.")
 representing the current project.")
 
 (defconst yynt-project-fixed-fields
-  '("build_time" "publish_time")
+  '("export_time" "publish_time")
   "Inherent fields in the cache database.")
 
 (cl-defstruct (yynt-project (:conc-name yynt-project--)
@@ -67,7 +69,7 @@ representing the current project.")
 			    (:copier nil))
   "Struct definition for yynt projects. Create it with `yynt-create-project'.
 
-Create a build object belonging to the project by calling
+Please create a build object belonging to the project by calling
 `yynt-create-build' after calling `yynt-create-project'.
 
 If cache is nil, the caching mechanism is not used."
@@ -82,11 +84,11 @@ If cache is nil, the caching mechanism is not used."
   "Return t if S is a string containing a non-blank character.
 Otherwise, return nil.
 
-Get from `org-string-nw-p'."
+From `org-string-nw-p'."
   (and (stringp s) (string-match-p "[^ \r\t\n]" s)))
 
 (defun yynt--cache-item-p (s)
-  "Return t if S is a valid cache-item. Otherwise return nil."
+  "Return t if S is a valid cache-item name. Otherwise return nil."
   (and (yynt--string-nw-p s)
        (string-match-p "[A-Za-z][0-9A-Za-z_]*" s)
        (not (member s (cons "path" yynt-project-fixed-fields)))))
@@ -141,9 +143,13 @@ provided, it will use `default-directory' as the default value."
   ;; Normalization of the cache file path
   (unless (or (null cache) (file-name-absolute-p cache))
     (setq cache (expand-file-name cache directory)))
+
+  ;; Since sqlite-open will create the file, we do not need to create the cache
+  ;; file ourselves here.
   ;; ;; Create Cache file if necessary
   ;; (when (and (stringp cache) (not (file-exists-p cache)))
   ;;   (with-temp-file cache))
+
   ;; Normalization of cache-items, converting all to lowercase
   (setq cache-items (append yynt-project-fixed-fields
 			    (mapcar #'downcase cache-items)))
@@ -179,8 +185,7 @@ NAME is the name of the project and is of symbol type."
 
 If PROJECT is not provided, use `yynt-current-project'."
   (if-let ((project (or project yynt-current-project)))
-    (file-in-directory-p (file-truename file)
-			 (yynt-project--dir project))
+      (file-in-directory-p file (yynt-project--dir project))
     (error "project not specified: %s" project)))
 
 (defun yynt-project-has-cache-p (project)
@@ -189,11 +194,17 @@ If PROJECT is not provided, use `yynt-current-project'."
 
 (defun yynt-get-file-project-basename (file project)
   "Get the relative path of a FILE with respect to its PROJECT."
-  (declare (pure t))
+  ;; [TODO] Consider removing the validation step if this function is only
+  ;; called internally.
   (if (not (yynt-in-project-p file project))
       (error "file %s not in project %s" file project)
     (let ((dir (yynt-project--dir project)))
       (substring file (length dir)))))
+
+(defun yynt-get-file-project-fullname (file project)
+  "Get the full path of FILE with respect to its PROJECT"
+  (let ((dir (yynt-project--dir project)))
+    (file-name-concat dir file)))
 
 
 ;;; Implementation of the caching functionality.
@@ -492,7 +503,7 @@ time format must be YYYY-MM-DD hh:mm:ss"
 		    (yynt-log "ok" t) (yynt-log "fail" t))
 	      (unless buf0 (kill-buffer)))))
       (let ((btime (or (car (yynt-select-cache-1
-			     project file '("build_time")))
+			     project file '("export_time")))
 		       "1900-01-01 00:00"))
 	    (ctime (yynt-get-file-ctime file)))
 	(if (and (not force) (yynt-time-less-p ctime btime))
@@ -508,7 +519,7 @@ time format must be YYYY-MM-DD hh:mm:ss"
 		    (if (not res) (yynt-log "fail" t)
 		      (yynt-upsert-cache
 		       project file
-		       (cons "build_time" (car props))
+		       (cons "export_time" (car props))
 		       (cons time (cdr props)))))
 		(unless buf0 (kill-buffer))))))))))
 
