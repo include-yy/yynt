@@ -345,6 +345,9 @@ Ensure that `yynt--sqlite-obj' belongs to the PROJECT."
     (yynt-select-cache-1 project file keys)))
 
 ;;; Definition of yynt-build and some helper functions.
+
+;; TODO: Consider a more rigorous yynt-create-build.
+
 (cl-defstruct (yynt-build (:conc-name yynt-build--)
 			  (:constructor yynt-build--make)
 			  (:copier nil))
