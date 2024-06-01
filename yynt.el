@@ -97,7 +97,7 @@ From `org-string-nw-p'."
        (not (member s (cons "path" yynt-project-fixed-fields)))))
 
 (defun yynt-create-project (name pubdir cache cache-items &optional directory)
-  "Create a new yynt project.
+  "Create a new `yynt-project' object.
 
 NAME is the name symbol of the project, which must be a non-nil and
 non-keyword symbol.
@@ -348,29 +348,89 @@ Ensure that `yynt--sqlite-obj' belongs to the PROJECT."
 (cl-defstruct (yynt-build (:conc-name yynt-build--)
 			  (:constructor yynt-build--make)
 			  (:copier nil))
-  "Struct that contains build info of a series of files"
-  (project nil :documentation "project object that belongs to")
-  (name nil :documentation "name of this build object")
-  (path nil :documentation "full path to this build-object")
-  (type 0 :documentation "type of build object. It can be 0, 1 or 2")
-  (collect #'ignore :documentation "(bobj) => list of files need build")
-  (info nil :documentation "org export info plist")
-  (collect-ex #'ignore :documentation "function that collect extra files")
-  (info-ex nil :documentation "additional info plist")
-  (fn #'ignore :documentation "export funtion (PLIST) -> nil")
-  (attrs nil :documentation "keywords extract from source file")
-  (no-cache-files-ht nil :documentation "files without caching")
-  (ext-files nil :documentation "external files depend on this build object")
-  (convert-fn nil :documentation "convert input file to output file name")
-  (included-resources nil :documentation "resources to be published")
-  (collect-2 #'ignore :documentation "(bobj) -> list of dir for pub")
-  (excluded-fn-2 nil :documentation "(bobj path) -> excluded pred"))
+  "Struct that contains build info of a series of files.
 
-(cl-defun yynt-create-build (&key type path collect info collect-ex info-ex
-				  fn attrs no-cache-files external-files
+Create it with `yynt-create-build'"
+  (project nil :documentation "Project that belongs to.")
+  (name nil :documentation "Name of this build object.")
+  (path nil :documentation "Relative path to project's root")
+  (type 0 :documentation "Type number of build object. [012]")
+  (collect #'ignore :documentation "(bobj) => list of export files.")
+  (info nil :documentation "(Org) export info plist.")
+  (collect-ex #'ignore :documentation "(bobj) => list of other export files.")
+  (info-ex nil :documentation "Export info plist for collect-ex.")
+  (fn #'ignore :documentation "Export funtion: (PLIST) => nil.")
+  (attrs nil :documentation "Keywords extract from source file.")
+  (no-cache-files-ht nil :documentation "Files without caching.")
+  (ext-files nil :documentation "External files depend on this build object.")
+  (published t :documentation "Whether to publish.")
+  (convert-fn nil :documentation "Convert input file to output file name.")
+  (included-resources nil :documentation "resources to be published.")
+  (collect-2 #'ignore :documentation "(bobj) => list of dir for pub.")
+  (excluded-fn-2 nil :documentation "(bobj path) => excluded pred."))
+
+(cl-defun yynt-create-build (&key project path type collect info collect-ex
+				  info-ex fn attrs no-cache-files ext-files
 				  convert-fn included-resources collect-2
 				  excluded-fn-2)
-  "create `yynt-build' object with `yynt--temp-project' as belonged project."
+  "Create a new `yynt-build' object.
+
+If PROJECT is provided, it will be used as the project object pointed to
+by the build object. Otherwise, `yynt--temp-project' will be used.
+
+PATH is a path string relative to the project path.
+
+TYPE is a numeric identifier for the build object' type. It can be 0, 1,
+or 2, representing a single file, one-level directory, and two-level
+directory, respectively.
+
+COLLECT is a function that accepts a build object and returns all the
+files in the build object that need to be exported. Type 0 projects do
+not require this parameter.
+
+INFO is a plist containing export configuration information. For
+details, refer to the EXT-PLIST docstring in `org-export-as'.
+
+COLLECT-EX accepts a build object as a parameter and returns additional
+files that need to be exported. Type 0 projects do not require this
+parameter.
+
+INFO-EX provides export information for the files obtained from
+COLLECT-EX. It will layer over INFO and may override some of INFO's
+information.
+
+FN is the export function that will export the current buffer. It
+accepts an INFO plist as a parameter. If the function does not signal an
+error, the export is considered successful.
+
+ATTRS is a list of keywords used to obtain metadata from the files to be
+exported. They must belong to the project's cache-items and cannot
+include keywords from `yynt-project-fixed-fields'.
+
+NO-CACHE-FILES specifies files that do not need to be cached. They are
+paths relative to the build object path. For type 0 projects, set to nil
+to indicate none exist, or t to cache the single file.
+
+EXT-FILES specifies a list of files that depend on the build object's
+content. They are paths relative to the project object's directory.
+
+CONVERT-FN converts the name of the file to be exported into the name of
+the resulting exported file.
+
+INCLUDED-RESOURCES is a list of resource files that the build object
+needs to publsih. They are paths relative to the build object's
+directory. For type 0 projects, they are relative to the project's
+directory.
+
+COLLECT-2 accepts bobj as a parameter and returns a list of directories
+that need to be published. The returned directories are paths relative
+to the bobj directory. It is only used for type 2 build objects.
+
+EXCLUDED-FN-2 is a function that accepts bobj and PATH and returns a
+predicate function. PATH is the path relative to the bobj directory that
+contains resources. The returned predicate function returns nil for file
+names that need to be published and t for file names that do not need to
+be published."
   (when (not (yynt-project-p yynt--temp-project))
     (error "seems not a valid yynt-project: %s" yynt--temp-project))
   (let* ((project-dir (yynt-project--dir yynt--temp-project))
@@ -394,14 +454,6 @@ Ensure that `yynt--sqlite-obj' belongs to the PROJECT."
 	  (cons obj (cl-remove full-path builds
 			       :test #'string=
 			       :key #'yynt-build--path)))))
-
-(defun yynt-get-file-project-basename (file project)
-  "Get the relative path of a FILE with respect to its PROJECT."
-  (declare (pure t))
-  (if (not (yynt-in-project-p file project))
-      (error "file %s not in project %s" file project)
-    (let ((dir (yynt-project--dir project)))
-      (substring file (length dir)))))
 
 (defun yynt-get-file-build-basename (file bobj)
   (if (not (yynt-in-build-p bobj file))
