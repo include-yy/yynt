@@ -197,7 +197,7 @@ If PROJECT is not provided, use `yynt-current-project'."
 
 (defun yynt-get-file-project-basename (file project)
   "Get the relative path of a FILE with respect to its PROJECT."
-  ;; [TODO] Consider removing the validation step if this function is only
+  ;; TODO: Consider removing the validation step if this function is only
   ;; called internally.
   (if (not (yynt-in-project-p file project))
       (error "file %s not in project %s" file project)
@@ -301,7 +301,7 @@ Ensure that `yynt--sqlite-obj' belongs to the PROJECT."
 			      (cons base values) ","))
 	 (kv-seq (mapconcat (lambda (x) (format "%s='%s'" (car x) (cdr x)))
 			    (cl-mapcar #'cons keys values) ",")))
-    ;; [TODO] Condier remove this validation if possible.
+    ;; TODO: Condier remove this validation if possible.
     (if (not (cl-subsetp keys items :test #'string=))
 	(error "some keys not belong to cache-items: (%s, %s)"
 	       keys items)
@@ -363,7 +363,7 @@ Create it with `yynt-create-build'"
   (attrs nil :documentation "Keywords extract from source file.")
   (no-cache-files-ht nil :documentation "Files without caching.")
   (ext-files nil :documentation "External files depend on this build object.")
-  (published t :documentation "Whether to publish.")
+  (published nil :documentation "Whether to publish.")
   (convert-fn nil :documentation "Convert input file to output file name.")
   (included-resources nil :documentation "resources to be published.")
   (collect-2 #'ignore :documentation "(bobj) => list of dir for pub.")
@@ -371,8 +371,8 @@ Create it with `yynt-create-build'"
 
 (cl-defun yynt-create-build (&key project path type collect info collect-ex
 				  info-ex fn attrs no-cache-files ext-files
-				  convert-fn included-resources collect-2
-				  excluded-fn-2)
+				  published convert-fn included-resources
+				  collect-2 excluded-fn-2)
   "Create a new `yynt-build' object.
 
 If PROJECT is provided, it will be used as the project object pointed to
@@ -431,22 +431,58 @@ predicate function. PATH is the path relative to the bobj directory that
 contains resources. The returned predicate function returns nil for file
 names that need to be published and t for file names that do not need to
 be published."
-  (when (not (yynt-project-p yynt--temp-project))
-    (error "seems not a valid yynt-project: %s" yynt--temp-project))
-  (let* ((project-dir (yynt-project--dir yynt--temp-project))
+  (unless project (setq project yynt--temp-project))
+  (unless (not (yynt-project-p project))
+    (error "seems not a valid yynt-project: %s" project))
+  (unless (<= 0 type 2)
+    (error "seems not a valid yynt-object type: %s" type))
+  ;; TODO: Maybe we need a function to test if string is a valid path.
+  ;; This also applies to other file check validation.
+  (when (string-match-p "^/" path)
+    (error "seems not a valid relative pathname"))
+  (unless (functionp collect)
+    (error "not a valid collect function: %s" collect))
+  (unless (plistp info)
+    (error "not a valid info plist: %s" info))
+  (unless (functionp collect-ex)
+    (error "not a valid collect-ex function: %s" collect-ex))
+  (unless (plistp info-ex)
+    (error "not a valid info-ex plist: %s" info-ex))
+  (unless (functionp fn)
+    (error "not a valid export function: %s" fn))
+  (unless (and (cl-every #'yynt--cache-item-p attrs)
+	       (cl-subsetp attrs (yynt-project--cache-items project)))
+    (error "not a valid attrs"))
+  (unless (or (eq t no-cache-files)
+	      (cl-every #'stringp no-cache-files))
+    (error "not a valid no-cache-file list: %s" no-cache-files))
+  (unless (cl-every #'stringp ext-files)
+    (error "not a valid external file list: %s" ext-files))
+  (unless (functionp convert-fn)
+    (error "not a valid convert-fn: %s" convert-fn))
+  (unless (cl-every #'stringp included-resources)
+    (error "not a valid included-resources: %s" included-resources))
+  (unless (functionp collect-2)
+    (error "not a valid collect-2 function: %s" collect-2))
+  (unless (functionp excluded-fn-2)
+    (error "not a valid excluded-fn-2 function: %s" excluded-fn-2))
+  (let* ((project-dir (yynt-project--dir project))
 	 (full-path (expand-file-name path project-dir))
 	 (final-path (if (not (file-directory-p full-path)) full-path
 		       (file-name-as-directory full-path)))
 	 (ht (let ((ht (make-hash-table :test #'equal)))
-	       (prog1 ht (mapc (lambda (x) (puthash x t ht)) no-cache-files))))
+	       (if (eq type 0) ; type 0 just check itself
+		   (if (null no-cache-files) ht
+		     (prog1 ht (puthash path t ht)))
+		 (prog1 ht (mapc (lambda (x) (puthash x t ht)) no-cache-files)))))
 	 (obj (yynt-build--make
-	       :project yynt--temp-project
+	       :project project
 	       :name path :path final-path :type type
 	       :collect collect :info info
 	       :collect-ex collect-ex :info-ex info-ex
 	       :fn fn :attrs attrs :no-cache-files-ht ht
-	       :ext-files external-files
-	       :convert-fn convert-fn
+	       :ext-files ext-files
+	       :published published :convert-fn convert-fn
 	       :included-resources included-resources
 	       :collect-2 collect-2 :excluded-fn-2 excluded-fn-2))
 	 (builds (yynt-project--builds yynt--temp-project)))
@@ -456,10 +492,16 @@ be published."
 			       :key #'yynt-build--path)))))
 
 (defun yynt-get-file-build-basename (file bobj)
+  ;; TODO: consider remove this validation step.
+  ;; also, clearify that this function only used for type 2 and 3
   (if (not (yynt-in-build-p bobj file))
       (error "file %s not in build object %s" file bobj)
     (let ((dir (yynt-build--path bobj)))
       (substring file (length dir)))))
+
+(defun yynt-get-file-build-fullname (file bobj)
+  (let ((dir (yynt-build--path bobj)))
+    (file-name-concat dir file)))
 
 (defun yynt-in-build-p (bobj file)
   "determine if File is in BOBJ build object
