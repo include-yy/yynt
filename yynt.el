@@ -36,6 +36,9 @@
 (unless (sqlite-available-p)
   (error "Please ensure your emacs supports builtin sqlite utilities"))
 
+(unless (version<= "3.38" (sqlite-version))
+  (error "Please use sqlite version>= 3.38"))
+
 (defgroup yynt nil
   "a simple Org publish manager"
   :group 'applications)
@@ -209,10 +212,26 @@ If PROJECT is not provided, use `yynt-current-project'."
 
 ;;; Implementation of the caching functionality.
 
-(defvar yynt--sqlite-obj nil)
+;; In yynt, the database is primarily used for caching during export or publish,
+;; specifically to check if the modification time of the source files is later
+;; than the export time or publish time.
+
+;; Additionally, this cache database can store some file-related metadata during
+;; export, such as tags, article titles, or summary content. This allows for
+;; quick generation of summary content without having to read each file
+;; individually(Instead, we can read from database).
+
+;; The database has the following format:
+;; | path (PRIMARY KEY)             | fixed_fields ... | attrs ...  |
+;; | *path_related_to_project_root* | values ...       | values ... |
+
+(defvar yynt--sqlite-obj nil
+  "Temporary database object, used in conjunction with `yynt-with-sqlite'.")
 (defun yynt-open-sqlite (file)
+  "Call `sqlite-open' to open FILE and return an sqlite3 database object."
   (sqlite-open file))
 (defun yynt-close-sqlite (obj)
+  "Call `sqlite-close' to close the database object."
   (when (sqlitep obj) (sqlite-close obj)))
 (defmacro yynt-with-sqlite (project &rest body)
   "Open the project's cache file, evaluate the BODY, close the file.
@@ -226,16 +245,27 @@ The value returned is the value of the last form in the body."
 	 (yynt-close-sqlite yynt--sqlite-obj)))))
 
 (defun yynt-initialize-cache (project)
-  "Initialize the cache database, creating table if not exist."
+  "Initialize the cache database, creating table if not exist.
+
+If the database table already exists, this function will check if the
+fields in the project's cache-items match exactly with the fields in the
+table. If they do not match, the table will be recreated.
+
+The data with the same names from the old table will be copied to the
+new table, and the old table will be replaced by the new table with the
+same name."
   (let* ((fields (yynt-project--cache-items project)))
     (yynt-with-sqlite project
       (if-let* ((info (sqlite-select yynt--sqlite-obj
 				     "PRAGMA table_info(yynt)"))
+		;; https://www.sqlite.org/pragma.html#pragma_table_info
+		;; | cid | name | type | notnull | dflt_value | pk |
 		(old-fields (mapcar (lambda (ls) (nth 1 ls)) info)))
 	  (unless (equal fields old-fields)
 	    (let* ((new (mapconcat #'identity fields ","))
-		   (int (mapconcat
+		   (shr (mapconcat
 			 #'identity
+			 ;; retrieve common fields
 			 (cl-intersection fields old-fields :test #'string=)
 			 ",")))
 	      (with-sqlite-transaction yynt--sqlite-obj
@@ -246,10 +276,11 @@ The value returned is the value of the last form in the body."
 		(sqlite-execute
 		 yynt--sqlite-obj
 		 (format "INSERT INTO temp (path,%s) SELECT path,%s FROM yynt;"
-			 int int))
+			 shr shr))
 		(sqlite-execute yynt--sqlite-obj "DROP TABLE yynt;")
 		(sqlite-execute yynt--sqlite-obj
 				"ALTER TABLE temp RENAME to yynt;"))))
+	;; table yynt not exists
 	(sqlite-execute yynt--sqlite-obj
 			(format "CREATE TABLE yynt (path PRIMARY KEY,%s)"
 				(mapconcat #'identity fields ",")))))))
@@ -260,8 +291,9 @@ The value returned is the value of the last form in the body."
     (sqlite-execute yynt--sqlite-obj "DELETE FROM yynt;")))
 
 (defun yynt-upsert-cache-1 (project file keys values)
-  "Update or insert a row: update if the file already exists, otherwise
-insert."
+  "Update or insert a row: update if the file already exists, otherwise insert.
+
+Ensure that `yynt--sqlite-obj' belongs to the PROJECT."
   (let* ((items (yynt-project--cache-items project))
 	 (base (yynt-get-file-project-basename file project))
 	 (k-fields (mapconcat #'identity (cons "path" keys) ","))
@@ -269,6 +301,7 @@ insert."
 			      (cons base values) ","))
 	 (kv-seq (mapconcat (lambda (x) (format "%s='%s'" (car x) (cdr x)))
 			    (cl-mapcar #'cons keys values) ",")))
+    ;; [TODO] Condier remove this validation if possible.
     (if (not (cl-subsetp keys items :test #'string=))
 	(error "some keys not belong to cache-items: (%s, %s)"
 	       keys items)
@@ -284,7 +317,9 @@ ON CONFLICT(path) DO UPDATE SET %s"
     (yynt-upsert-cache-1 project file keys values)))
 
 (defun yynt-delete-cache-1 (project file)
-  "Delete a row."
+  "Delete a row.
+
+Ensure that `yynt--sqlite-obj' belongs to the PROJECT."
   (let ((key (yynt-get-file-project-basename file project)))
     (sqlite-execute
      yynt--sqlite-obj
@@ -295,12 +330,15 @@ ON CONFLICT(path) DO UPDATE SET %s"
     (yynt-delete-cache-1 project file)))
 
 (defun yynt-select-cache-1 (project file keys)
+  "Retrieve a record from the database.
+
+Ensure that `yynt--sqlite-obj' belongs to the PROJECT."
   (car-safe
    (sqlite-execute
     yynt--sqlite-obj
-    (format "SELECT %s FROM yynt where path=%s"
+    (format "SELECT %s FROM yynt where path='%s'"
 	    (mapconcat #'identity keys ",")
-	    (yynt-get-file-project-basename file)))))
+	    (yynt-get-file-project-basename file project)))))
 
 (defun yynt-select-cache (project file keys)
   (yynt-with-sqlite project
