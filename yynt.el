@@ -28,6 +28,10 @@
 
 ;;; Commentary:
 
+;; TODO:
+;; 1. Consider add dired support for export and publish
+;; 2. ...
+
 ;;; Code:
 
 (require 'cl-lib)
@@ -111,9 +115,10 @@ From `org-string-nw-p'."
 NAME is the name symbol of the project, which must be a non-nil and
 non-keyword symbol.
 
-PUBDIR is the publish directory, which must be of `string'
-type. If it is a relative path, it is relative to
-DIRECTORY. PUBDIR and DIRECTORY cannot be the same directory.
+PUBDIR is the publish directory, which must be of `string' type
+or nil (means no need to publish). If it is a relative path, it
+is relative to DIRECTORY. PUBDIR and DIRECTORY cannot be the same
+directory.
 
 CACHE can be nil or the path to the cache file. If it is a relative
 path, it is relative to the DIRECTORY. If CACHE is nil, it indicates
@@ -132,7 +137,7 @@ provided, it will use `default-directory' as the default value."
   ;; Check arguments
   (when (or (not (symbolp name)) (null name) (keywordp name))
     (error "not a valid project name: %s" name))
-  (unless (yynt--valid-filename-p pubdir)
+  (unless (or (null pubdir) (yynt--valid-filename-p pubdir))
     (error "not a valid pubdir: %s" pubdir))
   (unless (or (null cache) (yynt--valid-filename-p cache))
     (error "not a valid cache: %s" cache))
@@ -148,7 +153,7 @@ provided, it will use `default-directory' as the default value."
     (setq directory (file-name-as-directory (expand-file-name directory))))
    (t (error "directory may not exist or not a true directory: %s" directory)))
   ;; Normalization of the publish directory
-  (unless (file-name-absolute-p pubdir)
+  (unless (or (null pubdir) (file-name-absolute-p pubdir))
     (setq pubdir (expand-file-name pubdir directory)))
   (unless (file-equal-p directory pubdir)
     (error "pubdir and directory are the same directory: %s" directory))
@@ -205,8 +210,12 @@ If PROJECT is not provided, use `yynt-current-project'."
     (error "project not specified: %s" project)))
 
 (defun yynt-project-has-cache-p (project)
-  "Determine whether the PROJECT object uses the caching mechanism."
+  "Determine whether PROJECT object uses the caching mechanism."
   (yynt-project--cache project))
+
+(defun yynt-project-has-pubdir-p (project)
+  "Determine whether PROJECT has pubdir"
+  (yynt-project--pubdir project))
 
 (defun yynt-get-file-project-basename (file project)
   "Get the relative path of a FILE with respect to its PROJECT."
