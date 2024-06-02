@@ -31,6 +31,7 @@
 ;; TODO:
 ;; 1. Consider add dired support for export and publish
 ;; 2. Improve documentation and comments
+;; 3. Add the missing sqlite scope in export and publish parts
 
 ;;; Code:
 
@@ -155,7 +156,7 @@ provided, it will use `default-directory' as the default value."
   ;; Normalization of the publish directory
   (unless (or (null pubdir) (file-name-absolute-p pubdir))
     (setq pubdir (expand-file-name pubdir directory)))
-  (unless (file-equal-p directory pubdir)
+  (when (file-equal-p directory pubdir)
     (error "pubdir and directory are the same directory: %s" directory))
   ;; Create Publish directory if not exists
   (unless (file-exists-p pubdir)
@@ -456,7 +457,7 @@ contains resources. The returned predicate function returns nil for file
 names that need to be published and t for file names that do not need to
 be published."
   (unless project (setq project yynt--temp-project))
-  (unless (not (yynt-project-p project))
+  (unless (yynt-project-p project)
     (error "seems not a valid yynt-project: %s" project))
   (unless (and (integerp type) (<= 0 type 2))
     (error "seems not a valid yynt-object type: %s" type))
@@ -487,9 +488,9 @@ be published."
     (error "not a valid convert-fn: %s" convert-fn))
   (unless (cl-every #'yynt--valid-rela-filename-p included-resources)
     (error "not a valid included-resources: %s" included-resources))
-  (unless (and (eq type 2) (functionp collect-2))
+  (when (and (eq type 2) (not (functionp collect-2)))
     (error "not a valid collect-2 function: %s" collect-2))
-  (unless (and (eq type 2) (functionp excluded-fn-2))
+  (when (and (eq type 2) (not (functionp excluded-fn-2)))
     (error "not a valid excluded-fn-2 function: %s" excluded-fn-2))
   (let* ((project-dir (yynt-project--dir project))
 	 (full-path (expand-file-name path project-dir))
@@ -590,7 +591,7 @@ will be used as the project for lookup."
 			 (cl-find-if
 			  (lambda (p) (yynt-in-project-p file p))
 			  yynt-project-list)))
-	    (bobj (cl-find-if (lambda (b) (yynt-in-build-p file b))
+	    (bobj (cl-find-if (lambda (b) (yynt-in-build-p b file))
 			      (yynt-project--builds project))))
       bobj
     nil))
@@ -837,12 +838,12 @@ If invoked with C-u, force export."
 			 :key #'yynt-get-file-build-basename)
 	      (yynt-export-files bobj (list file) t force)
 	      (push (funcall conv-fn file) res-ex))
-	     (t (user-error "file seems not a exportable file"))))
-	  ;; return (bobj res res-ex res-ext)
-	  ;; used by `yynt-publish-file'
-	  (list bobj res res-ex
-		(yynt-export-external-files
-		 project (yynt-build--ext-files bobj))))))))
+	     (t (user-error "file seems not a exportable file")))))
+	;; return (bobj res res-ex res-ext)
+	;; used by `yynt-publish-file'
+	(list bobj res res-ex
+	      (yynt-export-external-files
+	       project (yynt-build--ext-files bobj)))))))
 
 (defun yynt-export-build (bobj &optional force)
   "Export selected build object."
