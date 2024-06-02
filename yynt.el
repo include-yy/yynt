@@ -181,6 +181,7 @@ provided, it will use `default-directory' as the default value."
     (setq yynt-project-list
 	  (cons project (cl-delete name yynt-project-list
 				   :key #'yynt-project--name)))
+
     ;; Initialize cache if necessary
     (when cache
       (yynt-initialize-cache project))
@@ -476,7 +477,8 @@ be published."
   (unless (functionp fn)
     (error "not a valid export function: %s" fn))
   (unless (and (cl-every #'yynt--cache-item-p attrs)
-	       (cl-subsetp attrs (yynt-project--cache-items project)))
+	       (cl-subsetp attrs (yynt-project--cache-items project)
+			   :test #'string=))
     (error "not a valid attrs"))
   (unless (or (and (eq type 0) (eq no-cache-files t))
 	      (cl-every #'yynt--valid-rela-filename-p no-cache-files))
@@ -526,7 +528,7 @@ be published."
 		:collect-2 collect-2 :excluded-fn-2 excluded-fn-2))
 	  (builds (yynt-project--builds project)))
       (setf (yynt-project--builds project)
-	    (cons obj (cl-remove full-path builds
+	    (cons obj (cl-remove final-path builds
 				 :test #'string=
 				 :key #'yynt-build--path)))
       obj)))
@@ -555,7 +557,8 @@ Used only for files that need to be exported."
       (1 (file-equal-p bpath (file-name-directory file)))
       (2 (or (file-equal-p bpath (file-name-directory file))
 	     (file-equal-p bpath (file-name-directory
-				  (file-name-directory file)))))
+				  (directory-file-name
+				   (file-name-directory file))))))
       (_ (error "seems not a valid build object type")))))
 
 (defun yynt-file-no-cache-p (bobj file)
@@ -727,7 +730,8 @@ If the parameter FORCE is non-nil, the file will always be exported."
 		      (yynt-upsert-cache
 		       project file
 		       (cons "export_time" (car props))
-		       (cons time (cdr props)))))
+		       (cons time (cdr props)))
+		      (yynt-log "ok" t)))
 		(unless buf0 (kill-buffer))))))))))
 
 (defun yynt-export-files (bobj files &optional ex force)
@@ -871,7 +875,6 @@ If invoked with C-u, force export."
 	  (yynt-export-build-object bobj force))))
     (message "export [%s] in %ss" bname (- (float-time) start-time))))
 
-
 
 ;;; Impl of publisher
 
@@ -906,11 +909,13 @@ If FORCE is non-nil, FILE will always be published."
 			 "2000-01-01 00:00"))
 	      (ctime (yynt-get-file-ctime file)))
 	  (if (and (not force) (yynt-time-less-p ctime ptime))
-	      (yynt-log "{%s} %s skipped" t)
+	      (yynt-log (format "{%s} %s skipped"
+				pname rela-file)
+			t)
 	    (yynt-publish-attachment file pub-dir)
 	    (yynt-upsert-cache-1 project file '("publish_time")
 				 (list (yynt-get-current-time)))
-	    (yynt-log (format "{%s} %s published" pname file) t)))))))
+	    (yynt-log (format "{%s} %s published" pname rela-file) t)))))))
 
 (defun yynt-publish-attach-dir-cached (project dir &optional force)
   "Publish DIR recursively to PROJECT pubdir."
@@ -934,6 +939,10 @@ If FORCE is non-nil, FILE will always be published."
 If NOEXTERNAL is non-nil, BOBJ ext-files will not be exported
 and published."
   (yynt-export-build-object bobj force noexternal)
+  (yynt-log (format "PUBLISHING {%s → %s}----------------------------"
+		    (yynt-project--name (yynt-build--project bobj))
+		    (yynt-build--name bobj))
+	    t)
   (when (yynt-build-can-publish-p bobj)
     (let ((type (yynt-build--type bobj))
 	  (co-fn (yynt-build--convert-fn bobj))
@@ -949,23 +958,21 @@ and published."
 		  (final (append outfiles
 				 (yynt-build--included-resources bobj))))
 	     (yynt-publish-attach-cached project final force)))
-	(2 (let* ((files (funcall (yynt-build--collect-ex bobj)))
+	(2 (let* ((files (funcall (yynt-build--collect-ex bobj) bobj))
 		  (outfiles (mapcar co-fn files)))
-	     (yynt-publish-attach-cached bobj outfiles force)
+	     (yynt-publish-attach-cached project outfiles force)
 	     (let* ((dirs (funcall (yynt-build--collect-2 bobj) bobj))
 		    (excl-fn (yynt-build--excluded-fn-2 bobj)))
 	       (dolist (d dirs)
 		 (let* ((pred (funcall excl-fn bobj d))
-			(files (yynt-directory-files d))
-			(final (mapcar (lambda (x) (file-name-concat d x))
+			(full-dir (yynt-get-file-build-fullname d bobj))
+			(files (yynt-directory-files full-dir))
+			(final (mapcar (lambda (x) (file-name-concat full-dir x))
 				       (cl-remove-if pred files))))
 		   (yynt-publish-attach-cached project final force)))))))
       (unless noexternal
 	(let* ((ext-files (yynt-build--ext-files bobj))
-	       (files (mapcar (lambda (x)
-				(yynt-get-file-project-fullname x project))
-			      ext-files))
-	       (outfiles (yynt-export-external-files project files)))
+	       (outfiles (yynt-export-external-files project ext-files)))
 	  (yynt-publish-attach-cached project outfiles force))))))
 
 (defun yynt-publish-build-object-list (bobjs &optional force)
