@@ -106,8 +106,8 @@ From `org-string-nw-p'."
        (not (string-match-p file-name-invalid-regexp file))))
 
 (defun yynt--valid-rela-filename-p (file)
-  (and (yynt--valid-filename-p s)
-       (not (string-match-p "^/" s))))
+  (and (yynt--valid-filename-p file)
+       (not (string-match-p "^/" file))))
 
 (defun yynt-create-project (name pubdir cache cache-items &optional directory)
   "Create a new `yynt-project' object.
@@ -567,7 +567,9 @@ For type 0, the FILE parameter is not mandatory."
 	  (path (yynt-build--path bobj))
 	  (type (yynt-build--type bobj)))
       (pcase type
-	(0 (gethash (yynt-get-file-project-basename path) ht))
+	(0 (gethash (yynt-get-file-project-basename
+		     path (yynt-build--project bobj))
+		    ht))
 	((or 1 2)
 	 (let ((name (yynt-get-file-build-basename file bobj)))
 	   (gethash name ht)))
@@ -701,8 +703,8 @@ If the parameter FORCE is non-nil, the file will always be exported."
     (yynt-log (format "[%s → %s] %s exporting... "
 		      pname bname basename))
     (if (yynt-file-no-cache-p bobj file)
-	(let ((buf0 (get-file-buffer file))
-	      (buf (if buf0 buf0 (find-file-noselect file))))
+	(let* ((buf0 (get-file-buffer file))
+	       (buf (if buf0 buf0 (find-file-noselect file))))
 	  (with-current-buffer buf
 	    (unwind-protect
 		(if (yynt--export-current-buffer fn plist)
@@ -745,7 +747,7 @@ combine info and info-ex."
 		 (yynt-build--info bobj))))
     (dolist (f files)
       (yynt--do-export project bobj pname bname attrs
-		       fn info file force))))
+		       fn info f force))))
 
 (defun yynt-export-external-files (project files)
   "Export the external file list FILES in PROJECT. Return the list
@@ -754,11 +756,11 @@ of generated file paths."
 			     files))
 	 res)
     (dolist (f full-files)
-      (if-let* ((obj (yynt-get-file-build-object x project))
+      (if-let* ((obj (yynt-get-file-build-object f project))
 		(cov-fn (yynt-build--convert-fn obj)))
 	  (progn (yynt-export-files obj (list f) t t)
 		 (push (funcall cov-fn f) res))
-	(error "file %s not belongs to any build object" x)))
+	(error "file %s not belongs to any build object" f)))
     res))
 
 (defun yynt-export-build-object (bobj &optional force noexternal)
@@ -811,6 +813,7 @@ If invoked with C-u, force export."
   (if (null file)
       (user-error "buffer seems not have `buffer-file-name'")
     (let* ((bobj (yynt-get-file-build-object file))
+	   (project (yynt-build--project bobj))
 	   (conv-fn (yynt-build--convert-fn bobj))
 	   res res-ex)
       (if (null bobj)
@@ -869,7 +872,7 @@ See `org-publish-attachment'"
       (copy-file file output t)
       output))
 
-(defun yynt-publish-attach-cached (project file &optional force)
+(defun yynt-publish-attach-file-cached (project file &optional force)
   "Publish FILE to PROJECT pubdir, write log messages,
 and update the cache if necessary.
 
@@ -900,14 +903,14 @@ If FORCE is non-nil, FILE will always be published."
   "Publish DIR recursively to PROJECT pubdir."
   (when (file-exists-p dir)
     (dolist (x (directory-files-recursively dir ".*"))
-      (yynt-publish-attach-cached project x force))))
+      (yynt-publish-attach-file-cached project x force))))
 
 (defun yynt-publish-attach-cached (project file-or-dir-ls &optional force)
   "Publish items in FILE-OR-DIR-LS to PROJECT pubdir."
   (dolist (x file-or-dir-ls)
     (if (file-directory-p x)
 	(yynt-publish-attach-dir-cached project x force)
-      (yynt-publish-attach-cached project x force))))
+      (yynt-publish-attach-file-cached project x force))))
 
 (defun yynt-directory-files (dir &optional full)
   (directory-files dir full directory-files-no-dot-files-regexp))
@@ -915,7 +918,7 @@ If FORCE is non-nil, FILE will always be published."
 (defun yynt-publish-build-object (bobj &optional force noexternal)
   "Export and Publish all files in BOBJ.
 
-If NOEXTERNAL is non-nil, BOBJ 's ext-files will not be exported
+If NOEXTERNAL is non-nil, BOBJ ext-files will not be exported
 and published."
   (yynt-export-build-object bobj force noexternal)
   (when (yynt-build-can-publish-p bobj)
@@ -930,7 +933,8 @@ and published."
 	(1 (let* ((files (append (funcall (yynt-build--collect bobj) bobj)
 				 (funcall (yynt-build--collect-ex bobj) bobj)))
 		  (outfiles (mapcar co-fn files))
-		  (final (append files (yynt-build--included-resources bobj))))
+		  (final (append outfiles
+				 (yynt-build--included-resources bobj))))
 	     (yynt-publish-attach-cached project final force)))
 	(2 (let* ((files (funcall (yynt-build--collect-ex bobj)))
 		  (outfiles (mapcar co-fn files)))
@@ -949,17 +953,18 @@ and published."
 				(yynt-get-file-project-fullname x project))
 			      ext-files))
 	       (outfiles (yynt-export-external-files project files)))
-	  (yynt-publish-attach-cached project files force))))))
+	  (yynt-publish-attach-cached project outfiles force))))))
 
 (defun yynt-publish-build-object-list (bobjs &optional force)
   "Export and Publish all files in BOBJS list"
   (let ((bobjs (cl-remove-if-not #'yynt-build-can-publish-p bobjs)))
     (when bobjs
-      (let ((ext-files (yynt-collect-external-files bobjs)))
+      (let* ((ext-files (yynt-collect-external-files bobjs))
+	     (project (yynt-build--project (car bobjs))))
 	(dolist (b bobjs)
 	  (yynt-publish-build-object b force t))
 	(let* ((files (mapcar (lambda (x)
-				(yynt-get-file-project-full x project))
+				(yynt-get-file-project-fullname x project))
 			      ext-files))
 	       (outfiles (yynt-export-external-files project files)))
 	  (yynt-publish-attach-cached
@@ -1012,8 +1017,7 @@ take form yynt2.el, need rewrite."
       (pcase (yynt-build--type bobj)
 	((or 0 1)
 	 (yynt-publish-attach-cached
-	  (yynt-build--project bobj)
-	  (append resource export-files) force))
+	  proj (append resource export-files) force))
 	(2
 	 (let ((extra-2
 		(if (not res) nil
@@ -1025,17 +1029,14 @@ take form yynt2.el, need rewrite."
 				(yynt-build--excluded-fn-2 bobj)
 				bobj dir))
 			 (files (yynt-directory-files dir))
-			 (files-1 (cl-remove-if pred files))
-			 (files-2 (mapcar
-				   (lambda (x) (file-name-concat dir-0 x))
-				   files-2)))))))
+			 (files-1 (cl-remove-if pred files)))
+		    (mapcar (lambda (x) (file-name-concat dir-0 x))
+			    files-1)))))
 	   (if (not extra-2)
 	       (yynt-publish-attach-cached
-		(yynt-build--project bobj)
-		(append resource export-files) force)
+		proj (append resource export-files) force)
 	     (yynt-publish-attach-cached
-	      (yynt-build--project bobj)
-	      (append extra-2 res-ex res-ext) force))))
+	      proj (append extra-2 res-ex res-ext) force))))
 	(_ (error "never happends")))
       (message (format "publish file in [%s] fin in %ss"
 		       (yynt-build--name bobj)
