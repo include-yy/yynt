@@ -422,8 +422,9 @@ NO-CACHE-FILES specifies files that do not need to be cached. They are
 paths relative to the build object path. For type 0 projects, set to nil
 to indicate none exist, or t to cache the single file.
 
-EXT-FILES specifies a list of files that depend on the build object's
-content. They are paths relative to the project object's directory.
+EXT-FILES specifies a list of files that depend on the build
+object's content. They are paths relative to the project object's
+directory. EXT-FILES must be files from function COLLECT-EX.
 
 CONVERT-FN converts the name of the file to be exported into the name of
 the resulting exported file.
@@ -578,33 +579,40 @@ will be used as the project for lookup."
 
 ;;; Implementation of the build functionality.
 
-;; logger
+(defconst yynt--keywords-extract-bound 2048
+  "Place bound for finding keywords from the start of buffer.")
+
+;;; logger used for export and publish.
 (defvar yynt--log-buffer "*yynt*"
-  "buffer for logging")
+  "Buffer for logging.")
 (defun yynt--create-log-buffer ()
-  "Create or get log buffer"
+  "Create or get log buffer."
   (let ((buf (get-buffer-create yynt--log-buffer)))
     (with-current-buffer buf
       (when (not (equal major-mode 'messages-buffer-mode))
 	(messages-buffer-mode)))
     buf))
 (defun yynt-log (message &optional newline)
-  "Write a log message to buffer named `yynt--log-buffer'"
+  "Write a log message to buffer named `yynt--log-buffer'.
+
+If NEWLINE is non-nil, this function will add a newline at the
+end of the MESSAGE."
   (when yynt-use-logger
     (with-current-buffer (yynt--create-log-buffer)
       (let ((inhibit-read-only t))
 	(goto-char (point-max))
 	(insert (concat message (and newline "\n")))))))
 (defun yynt-logger ()
-  "Show logger buffer"
+  "Show logger buffer."
   (interactive)
   (switch-to-buffer-other-window (yynt--create-log-buffer)))
 
 (defun yynt-combine-plists (&rest plists)
   "Create a single property list from all plists in PLISTS.
-The process starts by copying the first list, and then setting properties
-from the other lists.  Settings in the last list are the most significant
-ones and overrule settings in the other lists.
+The process starts by copying the first list, and then setting
+properties from the other lists. Settings in the last list are
+the most significant ones and overrule settings in the other
+lists.
 
 Copied from `org-combine-plists'"
   (let ((rtn (copy-sequence (pop plists)))
@@ -617,52 +625,65 @@ Copied from `org-combine-plists'"
     rtn))
 
 (defun yynt-get-org-keywords (infos)
-  "get (keyword . value) alist from the head of FILE
+  "Get (keyword . value) alist from the head of current buffer.
 
-INFOS is a list of keywords, keywords are case-insensitive
-format of keywords is #+KEY: VALUE.
-FILE must be a valid full path.
+INFOS is a list of keywords, keywords are
+case-insensitive. Format of keywords is #+KEY: VALUE.
 
-take from https://github.com/bastibe/org-static-blog"
+Get from https://github.com/bastibe/org-static-blog."
   (let ((case-fold-search t)
 	res-key res-val)
     (save-excursion
       (dolist (a infos)
 	(goto-char (point-min))
 	(when (search-forward-regexp
-	       (concat "^\\#\\+" a ":[ ]*\\(.+\\)$") 4096 t)
+	       (concat "^\\#\\+" a ":[ ]*\\(.+\\)$")
+	       yynt--keywords-extract-bound
+	       t)
 	  (push a res-key)
 	  (push (match-string 1) res-val))))
     (cons res-key res-val)))
 
 (defun yynt-get-file-ctime (filepath)
-  "get file's ctime, utc+0"
+  "Get file's ctime, utc+0."
   (format-time-string
    "%Y-%m-%d %T"
    (nth 5 (file-attributes filepath)) t))
 
+(defun yynt-get-current-time ()
+  "Get the current UTC+0 time as a string in the format
+YYYY-MM-DD hh:mm:ss."
+  (format-time-string "%Y-%m-%d %T" (current-time) t))
+
 (defun yynt-time-less-p (st1 st2)
-  "tell if st1's time is less than st2,
-time format must be YYYY-MM-DD hh:mm:ss"
+  "Tell if st1's time is less than st2. Time format must be
+ YYYY-MM-DD hh:mm:ss"
   (time-less-p (date-to-time st1)
 	       (date-to-time st2)))
 
 (defun yynt--export-current-buffer (fn plist)
-  "inner function"
+  "Call the export function. If the function does not signal an
+error, the export is considered successful and returns t;
+otherwise, it returns nil.
+
+If debug-on-error is enabled through toggle-debug-on-error,
+errors will not be caught."
   (condition-case-unless-debug nil
       (prog1 t (funcall fn plist))
     (error nil)))
 
-(defun yynt--do-export (bobj plist file &optional force)
-  "export and log, cache"
-  (let* ((project (yynt-build--project bobj))
-	 (basename (yynt-get-file-project-basename file project))
-	 (project-name (yynt-project--name project))
-	 (build-name (yynt-build--name bobj))
-	 (attrs (yynt-build--attrs bobj))
-	 (fn (yynt-build--fn bobj)))
+(defun yynt--do-export ( project bobj pname bname attrs
+			 fn plist file &optional force)
+  "Execute the specific export function, write log messages, and
+update the cache if necessary.
+
+If the file needs to be cached and its ctime is later than the
+cached export time, the file will be exported.
+
+If the parameter FORCE is non-nil, the file will always be exported."
+  (let* ((basename (yynt-get-file-project-basename file project)))
     (yynt-log (format "[%s → %s] %s exporting... "
-		      project-name build-name basename))
+		      pname bname basename))
     (if (yynt-file-no-cache-p bobj file)
 	(let ((buf0 (get-file-buffer file))
 	      (buf (if buf0 buf0 (find-file-noselect file))))
@@ -683,8 +704,7 @@ time format must be YYYY-MM-DD hh:mm:ss"
 	      (unwind-protect
 		  (let* ((props (yynt-get-org-keywords attrs))
 			 (res (yynt--export-current-buffer fn plist))
-			 (time (format-time-string
-				"%Y-%m-%d %T" (current-time) t)))
+			 (time (yynt-get-current-time)))
 		    (if (not res) (yynt-log "fail" t)
 		      (yynt-upsert-cache
 		       project file
@@ -693,27 +713,37 @@ time format must be YYYY-MM-DD hh:mm:ss"
 		(unless buf0 (kill-buffer))))))))))
 
 (defun yynt-export-files (bobj files &optional ex force)
-  "export one file under BOBJ"
-  (let ((info (if ex (yynt-combine-plists
-		      (yynt-build--info bobj)
-		      (yynt-build--info-ex bobj))
-		(yynt-build--info bobj))))
-    (dolist (f files)
-      (yynt--do-export bobj info file force))))
+  "Export the list of files FILES located under BOBJ.
 
-(defun yynt-export-extra-files (project files)
-  "export whole build object's external files"
+If the EX parameter is non-nil, the plist used for export will
+combine info and info-ex."
+  (let* ((project (yynt-build--project bobj))
+	 (pname (yynt-project--name project))
+	 (bname (yynt-build--name bobj))
+	 (attrs (yynt-build--attrs bobj))
+	 (fn (yynt-build--fn bobj))
+	 (info (if ex (yynt-combine-plists
+		       (yynt-build--info bobj)
+		       (yynt-build--info-ex bobj))
+		 (yynt-build--info bobj))))
+    (dolist (f files)
+      (yynt--do-export project bobj pname bname attrs
+		       fn info file force))))
+
+(defun yynt-export-external-files (project files)
+  "Export the external file list FILES in PROJECT"
   (let* ((base-path (yynt-project--dir project))
 	 (full-files (mapcar (lambda (x) (file-name-concat base-path x))
 			     files)))
-    (mapc (lambda (x)
-	    (if-let ((obj (yynt-get-file-build-object x project)))
-		(yynt-export-files obj (list x) t t)
-	      (error "file %s not belongs to any build object" x)))
-	  full-files)))
+    (dolist (f full-files)
+      (if-let ((obj (yynt-get-file-build-object x project)))
+	  (yynt-export-files obj (list f) t t)
+	(error "file %s not belongs to any build object" x)))))
 
 (defun yynt-export-build-object (bobj &optional force noexternal)
-  "export whole build object's files"
+  "Export all files in BOBJ.
+
+If NOEXTERNAL is non-nil, BOBJ's ext-files will not be exported."
   (let ((type (yynt-build--type bobj)))
     (pcase type
       (0 (let ((file (yynt-build--path bobj)))
@@ -727,56 +757,60 @@ time format must be YYYY-MM-DD hh:mm:ss"
 	 (yynt-export-files bobj files-2 t force)))
       (_ (error "not a valid build object type: %s" type)))
     (unless noexternal
-      (yynt-export-extra-files
+      (yynt-export-external-files
        (yynt-build--project bobj)
        (yynt-build--ext-files bobj)))))
 
+(defun yynt-collect-external-files (bobjs)
+  "Retrieve all ext-files from the BOBJS list."
+  (let* ((all-list (mapcar #'yynt-build--ext-files bobjs))
+	 (rtn (copy-sequence (pop all-list)))
+	 ls e)
+    (while all-list
+      (setq ls (pop all-list))
+      (while ls
+	(setq e (pop ls))
+	(cl-pushnew e rtn :test #'string=)))
+    rtn))
+
 (defun yynt-export-build-object-list (bobjs &optional force)
-  "export a list of build object"
+  "Export all files in the build object list BOBJS."
   (when bobjs
-    (let ((ext-files (cl-delete-duplicates
-		      (apply #'append
-			     (mapcar #'yynt-build--ext-files bobjs))
-		      :test #'equal)))
-      (dolist (b bobjs) (yynt-export-build-object b force))
-      (yynt-export-extra-files (yynt-build--project (car bobjs))
-			       ext-files))))
+    (let ((ext-files (yynt-collect-external-files bobjs)))
+      (dolist (b bobjs) (yynt-export-build-object b force t))
+      (yynt-export-external-files (yynt-build--project (car bobjs))
+				  ext-files))))
 
-(defun yynt-export-file (filename &optional force)
-  "User Command, export current buffer
-If called interactively, use current's buffer-file-name as FILENAME
+(defun yynt-export-file (file &optional force)
+  "Export current buffer.
 
-If invoked with C-u, force export"
+If called interactively, use current's `buffer-file-name' as FILE.
+If invoked with C-u, force export."
   (interactive (list (buffer-file-name) current-prefix-arg))
-  (if (null filename)
+  (if (null file)
       (user-error "buffer seems not have `buffer-file-name'")
-    (let ((bobj (yynt-get-file-build-object filename)))
+    (let ((bobj (yynt-get-file-build-object file)))
       (if (null bobj)
-	  (user-error "file %s seems not belong to one build object" filename)
+	  (user-error "file %s seems not belong to one build object" file)
 	(if (eq 0 (yynt-build--type bobj))
 	    (yynt-export-build-object bobj force)
-	  (let* ((len (yynt-build--path bobj))
-		 (basename (yynt-get-file-build-basename filename bobj)))
+	  (let* ((basename (yynt-get-file-build-basename file bobj)))
 	    (cond
 	     ((cl-member basename (funcall (yynt-build--collect bobj) bobj)
-			 :key (lambda (x) (substring x len)))
-	      (yynt-export-files bobj (list filename) nil force))
+			 :key #'yynt-get-file-build-basename)
+	      ;; TODO: consider type-2 files?
+	      (yynt-export-files bobj (list file) nil force)
+	      ;; export ex files
+	      (let ((ex-files (funcall (yynt-build--collect-ex bobj) bobj)))
+		(yynt-export-files bobj ex-files t force)))
 	     ((cl-member basename (funcall (yynt-build--collect-ex bobj) bobj)
-			 :key (lambda (x) (substring x len)))
-	      (yynt-export-files bobj (list filename) t force))
+			 :key #'yynt-get-file-build-basename)
+	      (yynt-export-files bobj (list file) t force))
 	     (t (user-error "file seems not a exportable file"))))
-	  (yynt-export-extra-files project (yynt-build--ext-files bobj)))))))
-
-(defun yynt-get-project-build-relative-path (&optional project)
-  "return alist of bobj's relative path name and bobj"
-  (ignore (or project (setq project yynt-current-project)))
-  (let* ((bobjs (yynt-project--builds project))
-	 (len (length (yynt-project--dir project))))
-    (mapcar (lambda (x) (cons (substring (yynt-build--path x) len) x))
-	    bobjs)))
+	  (yynt-export-external-files project (yynt-build--ext-files bobj)))))))
 
 (defun yynt-export-build (bobj &optional force)
-  "User Command, export selected build object"
+  "Export selected build object."
   (interactive (list (completing-read
 		      "Select a build object:> "
 		      (cons '("t" . t)
@@ -887,8 +921,8 @@ If invoked with C-u, force export"
 			     (mapcar #'yynt-build--ext-files bobjs))
 		      :test #'equal)))
       (dolist (b bobjs) (yynt-export-build-object b force))
-      (yynt-export-extra-files (yynt-build--project (car bobjs))
-			       ext-files))))
+      (yynt-export-external-files (yynt-build--project (car bobjs))
+				  ext-files))))
 
 (defun yynt-publish-build-object-list (bobjs &optional force)
   "build and publish build objects"
