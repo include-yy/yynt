@@ -44,7 +44,7 @@
   (error "Please use sqlite version>= 3.38"))
 
 (defgroup yynt nil
-  "a simple Org publish manager"
+  "A simple Org publish manager."
   :group 'applications)
 
 (defcustom yynt-use-logger t
@@ -57,9 +57,9 @@ The logger will be used to output export messages and file publish messages."
 ;;; Definition of yynt-project and some helper functions.
 
 (defvar yynt-project-list nil
-  "list of all yynt project.")
+  "List of all yynt project.")
 (defvar yynt-current-project nil
-  "current project's `yynt-project' object.
+  "Current project's `yynt-project' object.
 
 Set it using `yynt-choose-project'.")
 
@@ -85,13 +85,13 @@ If cache is nil, the caching mechanism is not used."
   (pubdir nil :documentation "Full path of the publish directory.")
   (cache nil :documentation "Full path of the cache file.")
   (cache-items nil :documentation "Items that need to be cached.")
-  (builds nil :documentation "list of `yynt-build' objects."))
+  (builds nil :documentation "List of `yynt-build' objects."))
 
 (defun yynt--string-nw-p (s)
   "Return t if S is a string containing a non-blank character.
 Otherwise, return nil.
 
-From `org-string-nw-p'."
+Get from `org-string-nw-p'."
   (and (stringp s) (string-match-p "[^ \r\t\n]" s)))
 
 (defun yynt--cache-item-p (s)
@@ -101,11 +101,14 @@ From `org-string-nw-p'."
        (not (member s (cons "path" yynt-project-fixed-fields)))))
 
 (defun yynt--valid-filename-p (file)
-  "Determine if FILE is a valid path string"
+  "Determine if FILE is a valid path string."
   (and (yynt--string-nw-p file)
        (not (string-match-p file-name-invalid-regexp file))))
 
 (defun yynt--valid-rela-filename-p (file)
+  "Determine if FILE is a valid relative path string.
+
+A relative path cannot start with \"/\"."
   (and (yynt--valid-filename-p file)
        (not (string-match-p "^/" file))))
 
@@ -220,7 +223,7 @@ If PROJECT is not provided, use `yynt-current-project'."
 
 (defun yynt-get-file-project-basename (file project)
   "Get the relative path of a FILE with respect to its PROJECT."
-  ;; TODO: Consider removing the validation step if this function is only
+  ;; FIXME: Consider removing the validation step if this function is only
   ;; called internally.
   (if (not (yynt-in-project-p file project))
       (error "file %s not in project %s" file project)
@@ -228,7 +231,7 @@ If PROJECT is not provided, use `yynt-current-project'."
       (substring file (length dir)))))
 
 (defun yynt-get-file-project-fullname (file project)
-  "Get the full path of FILE with respect to its PROJECT"
+  "Get the full path of FILE with respect to its PROJECT."
   (let ((dir (yynt-project--dir project)))
     (file-name-concat dir file)))
 
