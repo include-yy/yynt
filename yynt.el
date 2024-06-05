@@ -248,8 +248,8 @@ If PROJECT is not provided, use `yynt-current-project'."
 ;; individually(Instead, we can read from database).
 
 ;; The database has the following format:
-;; | path (PRIMARY KEY)             | fixed_fields ... | attrs ...  |
-;; | *path_related_to_project_root* | values ...       | values ... |
+;; | path (PRIMARY KEY)             | fixed_field | ... | attrs  | ... |
+;; | path_related_to_project_root   | value       | ... | values | ... |
 
 (defvar yynt--sqlite-obj nil
   "Temporary database object, used in conjunction with `yynt-with-sqlite'.")
@@ -261,7 +261,10 @@ If PROJECT is not provided, use `yynt-current-project'."
   (when (sqlitep obj) (sqlite-close obj)))
 (defmacro yynt-with-sqlite (project &rest body)
   "Open the project's cache file, evaluate the BODY, close the file.
-The value returned is the value of the last form in the body."
+The value returned is the value of the last form in the body.
+
+If PROJECT does not support the cache mechanism, the effect of this
+macro is equivalent to progn."
   (declare (indent 1))
   (let ((proj (gensym)))
     `(let* ((,proj ,project)
@@ -271,11 +274,11 @@ The value returned is the value of the last form in the body."
 	 (yynt-close-sqlite yynt--sqlite-obj)))))
 
 (defun yynt-initialize-cache (project)
-  "Initialize the cache database, creating table if not exist.
+  "Initialize the cache database, creating table YYNT if not exist.
 
-If the database table already exists, this function will check if the
+If the table YYNT already exists, this function will check if the
 fields in the project's cache-items match exactly with the fields in the
-table. If they do not match, the table will be recreated.
+table. If they do not match, the table YYNT will be recreated.
 
 The data with the same names from the old table will be copied to the
 new table, and the old table will be replaced by the new table with the
@@ -295,24 +298,29 @@ same name."
 			 (cl-intersection fields old-fields :test #'string=)
 			 ",")))
 	      (with-sqlite-transaction yynt--sqlite-obj
+		;; drop the temporary table TEMP if exists
 		(sqlite-execute yynt--sqlite-obj "DROP TABLE IF EXISTS temp;")
+		;; create temporary table TEMP with new items
 		(sqlite-execute
 		 yynt--sqlite-obj
 		 (format "CREATE TABLE temp (path PRIMARY KEY,%s);" new))
+		;; insert rows from old table to new table
 		(sqlite-execute
 		 yynt--sqlite-obj
 		 (format "INSERT INTO temp (path,%s) SELECT path,%s FROM yynt;"
 			 shr shr))
+		;; drop old table YYNT
 		(sqlite-execute yynt--sqlite-obj "DROP TABLE yynt;")
+		;; rename table TEMP to YYNT
 		(sqlite-execute yynt--sqlite-obj
 				"ALTER TABLE temp RENAME to yynt;"))))
-	;; table yynt not exists
+	;; table yynt not ever exists
 	(sqlite-execute yynt--sqlite-obj
 			(format "CREATE TABLE yynt (path PRIMARY KEY,%s)"
 				(mapconcat #'identity fields ",")))))))
 
 (defun yynt-clear-cache (project)
-  "Clear the database."
+  "Clear the table YYNT."
   (yynt-with-sqlite project
     (sqlite-execute yynt--sqlite-obj "DELETE FROM yynt;")))
 
@@ -327,7 +335,7 @@ Ensure that `yynt--sqlite-obj' belongs to the PROJECT."
 			      (cons base values) ","))
 	 (kv-seq (mapconcat (lambda (x) (format "%s='%s'" (car x) (cdr x)))
 			    (cl-mapcar #'cons keys values) ",")))
-    ;; TODO: Condier remove this validation if possible.
+    ;; FIXME: Condier remove this validation if possible.
     (if (not (cl-subsetp keys items :test #'string=))
 	(error "some keys not belong to cache-items: (%s, %s)"
 	       keys items)
@@ -339,11 +347,12 @@ ON CONFLICT(path) DO UPDATE SET %s"
 	       k-fields v-fields kv-seq)))))
 
 (defun yynt-upsert-cache (project file keys values)
+  "Do upsert operation under sqlite context."
   (yynt-with-sqlite project
     (yynt-upsert-cache-1 project file keys values)))
 
 (defun yynt-delete-cache-1 (project file)
-  "Delete a row.
+  "Delete a row using FILE as the primary key, if it exists.
 
 Ensure that `yynt--sqlite-obj' belongs to the PROJECT."
   (let ((key (yynt-get-file-project-basename file project)))
@@ -352,6 +361,7 @@ Ensure that `yynt--sqlite-obj' belongs to the PROJECT."
      "DELETE FROM yynt WHERE path=?" (list key))))
 
 (defun yynt-delete-cache (project file)
+  "Do delete operation udner sqlite context."
   (yynt-with-sqlite project
     (yynt-delete-cache-1 project file)))
 
@@ -367,6 +377,7 @@ Ensure that `yynt--sqlite-obj' belongs to the PROJECT."
 	    (yynt-get-file-project-basename file project)))))
 
 (defun yynt-select-cache (project file keys)
+  "Do select operation under sqlite context."
   (yynt-with-sqlite project
     (yynt-select-cache-1 project file keys)))
 
