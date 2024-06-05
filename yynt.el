@@ -383,16 +383,33 @@ Ensure that `yynt--sqlite-obj' belongs to the PROJECT."
 
 ;;; Definition of yynt-build and some helper functions.
 
+;; The build structure includes all the information I believe is needed for
+;; export and publish. I have classified the subprojects that need to be
+;; exported and published into three categories: single file, single-level file
+;; directory, and two-level file directory. They are:
+
+;; - single file (type-0): just a file and related resources.
+;; - single-level directory (type-1): {dir}/*.org and related resources.
+;; - two-level directory (type-2): {dir}/*/*.org and related resources.
+
+;; Type-2 is quite special; For publishing, it requires specifying the
+;; directories to be exported and the exclusion items within each
+;; directory. This requires the user to fill in the collect-2 and excluded-fn-2
+;; fields.
+
+;; Please read the docstrings of the yynt-build structure and the
+;; yynt-create-build function to understand their usage in detail.
+
 (cl-defstruct (yynt-build (:conc-name yynt-build--)
 			  (:constructor yynt-build--make)
 			  (:copier nil))
   "Struct that contains build info of a series of files.
 
-Create it with `yynt-create-build'"
+Create it with `yynt-create-build'."
   (project nil :documentation "Project that belongs to.")
   (name nil :documentation "Name of this build object.")
-  (path nil :documentation "Relative path to project's root")
-  (type 0 :documentation "Type number of build object. [012]")
+  (path nil :documentation "Relative path to project's root.")
+  (type 0 :documentation "Type number of build object: [012].")
   (collect #'ignore :documentation "(bobj) => list of export files.")
   (info nil :documentation "(Org) export info plist.")
   (collect-ex #'ignore :documentation "(bobj) => list of other export files.")
@@ -403,7 +420,7 @@ Create it with `yynt-create-build'"
   (ext-files nil :documentation "External files depend on this build object.")
   (published nil :documentation "Whether to publish.")
   (convert-fn nil :documentation "Convert input file to output file name.")
-  (included-resources nil :documentation "resources to be published.")
+  (included-resources nil :documentation "Resources to be published.")
   (collect-2 #'ignore :documentation "(bobj) => list of dir for pub.")
   (excluded-fn-2 nil :documentation "(bobj path) => excluded pred."))
 
@@ -493,7 +510,7 @@ be published."
   (unless (and (cl-every #'yynt--cache-item-p attrs)
 	       (cl-subsetp attrs (yynt-project--cache-items project)
 			   :test #'string=))
-    (error "not a valid attrs"))
+    (error "not a valid attrs %s" attrs))
   (unless (or (and (eq type 0) (eq no-cache-files t))
 	      (cl-every #'yynt--valid-rela-filename-p no-cache-files))
     (error "not a valid no-cache-file list: %s" no-cache-files))
@@ -509,30 +526,30 @@ be published."
     (error "not a valid excluded-fn-2 function: %s" excluded-fn-2))
   (let* ((project-dir (yynt-project--dir project))
 	 (full-path (expand-file-name path project-dir))
-	 (final-path (if (not (file-directory-p full-path)) full-path
+	 (build-path (if (not (file-directory-p full-path)) full-path
 		       (file-name-as-directory full-path)))
-	 (name (if (not (file-directory-p final-path)) path
+	 (name (if (not (file-directory-p build-path)) path
 		   (directory-file-name path)))
-	 (ht (let ((ht (make-hash-table :test #'equal)))
+	 (ht (let ((ht (make-hash-table :test #'string=)))
 	       (if (eq type 0) ; type 0 just check itself
 		   (if (null no-cache-files) ht
 		     (prog1 ht (puthash path t ht)))
-		 (prog1 ht (mapc (lambda (x) (puthash x t ht)) no-cache-files)))))
+		 (dolist (x no-cache-files ht) (puthash x t ht)))))
 	 ;; generate a collect function for type-0
 	 (collect (if (not (and (eq type 0) (null collect))) collect
-		      (lambda (_bobj) final-path)))
+		      (lambda (_bobj) build-path)))
 	 ;; translate include-resources to full path
 	 ;; note for type-0 build object, we use project's dir as base dir
 	 (i-res (if (eq type 0)
 		    (mapcar (lambda (x) (yynt-get-file-project-fullname x project))
 			    included-resources)
-		  (mapcar (lambda (x) (file-name-concat final-path x))
+		  (mapcar (lambda (x) (expand-file-name x build-path))
 			  included-resources))))
     (unless (cl-every #'file-exists-p i-res)
       (error "seems some resources not exist: %s" i-res))
     (let ((obj (yynt-build--make
 		:project project
-		:name name :path final-path :type type
+		:name name :path build-path :type type
 		:collect collect :info info
 		:collect-ex collect-ex :info-ex info-ex
 		:fn fn :attrs attrs :no-cache-files-ht ht
@@ -542,7 +559,7 @@ be published."
 		:collect-2 collect-2 :excluded-fn-2 excluded-fn-2))
 	  (builds (yynt-project--builds project)))
       (setf (yynt-project--builds project)
-	    (cons obj (cl-remove final-path builds
+	    (cons obj (cl-remove build-path builds
 				 :test #'string=
 				 :key #'yynt-build--path)))
       obj)))
