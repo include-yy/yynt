@@ -31,6 +31,7 @@
 ;; TODO:
 ;; 1. Consider add dired support for export and publish
 ;; 2. Improve documentation and comments
+;; 3. Add a transient interface(MAYBE)
 
 ;;; Code:
 
@@ -530,14 +531,14 @@ be published."
 		       (file-name-as-directory full-path)))
 	 (name (if (not (file-directory-p build-path)) path
 		   (directory-file-name path)))
-	 (ht (let ((ht (make-hash-table :test #'string=)))
+	 (ht (let ((ht (make-hash-table :test #'equal)))
 	       (if (eq type 0) ; type 0 just check itself
 		   (if (null no-cache-files) ht
 		     (prog1 ht (puthash path t ht)))
 		 (dolist (x no-cache-files ht) (puthash x t ht)))))
 	 ;; generate a collect function for type-0
 	 (collect (if (not (and (eq type 0) (null collect))) collect
-		      (lambda (_bobj) build-path)))
+		      (lambda (_bobj) `(,build-path))))
 	 ;; translate include-resources to full path
 	 ;; note for type-0 build object, we use project's dir as base dir
 	 (i-res (if (eq type 0)
@@ -628,10 +629,18 @@ will be used as the project for lookup."
 
 ;;; Implementation of the build functionality.
 
+;; In this section, the main functions implemented include logging, extracting
+;; keyword information from the files to be exported, individual export of Build
+;; Objects, batch export of Build Objects, and single file export.
+
+;; The files collected by function collect-ex depend on the files collected by
+;; function collect. If the former needs to gather summary information from the
+;; latter, the cache database YYNT might be useful.
+
 (defconst yynt--keywords-extract-bound 2048
   "Place bound for finding keywords from the start of buffer.")
 
-;;; logger used for export and publish.
+;; logger used for export and publish.
 (defvar yynt--log-buffer "*yynt*"
   "Buffer for logging.")
 (defun yynt--create-log-buffer ()
@@ -693,6 +702,7 @@ Get from https://github.com/bastibe/org-static-blog."
 	  (push (match-string 1) res-val))))
     (cons res-key res-val)))
 
+;; Time functions.
 (defun yynt-get-file-ctime (filepath)
   "Get file's ctime, utc+0."
   (format-time-string
@@ -710,6 +720,25 @@ YYYY-MM-DD hh:mm:ss."
   (time-less-p (date-to-time st1)
 	       (date-to-time st2)))
 
+(define-inline yynt-buildm-collect (bobj)
+  "Call the collect function of BOBJ to retrieve the files."
+  (inline-letevals (bobj)
+    (inline-quote (funcall (yynt-build--collect ,bobj) ,bobj))))
+
+(define-inline yynt-buildm-collect-ex (bobj)
+  "Call the collect-ex function of BOBJ to retrieve the files."
+  (inline-letevals (bobj)
+    (inline-quote (funcall (yynt-build--collect-ex ,bobj) ,bobj))))
+
+(define-inline yynt-buildm-project-name (bobj)
+  "Retrieve the name of the PROJECT to which BOBJ points."
+  (inline-quote (yynt-project--name (yynt-build--project ,bobj))))
+
+(define-inline yynt-buildm-convert (bobj file)
+  "Retrieve the export file name of FILE under BOBJ."
+  (inline-letevals (bobj file)
+    (funcall (yynt-build--convert-fn ,bobj) ,file)))
+
 (defun yynt--export-current-buffer (fn plist)
   "Call the export function. If the function does not signal an
 error, the export is considered successful and returns t;
@@ -726,14 +755,14 @@ errors will not be caught."
   "Execute the specific export function, write log messages, and
 update the cache if necessary.
 
-If the file needs to be cached and its ctime is later than the
+For files that need to be cached, this function requires an sqlite
+context. If the file needs to be cached and its ctime is later than the
 cached export time, the file will be exported.
 
 If the parameter FORCE is non-nil, the file will always be exported."
   (let* ((basename (yynt-get-file-project-basename file project)))
-    (yynt-log (format "[%s → %s] %s exporting... "
-		      pname bname basename))
-    (if (yynt-file-no-cache-p bobj file)
+    (yynt-log (format "[%s → %s] %s exporting... " pname bname basename))
+    (if (yynt-file-no-cache-p bobj file) ; don't need cache
 	(let* ((buf0 (get-file-buffer file))
 	       (buf (if buf0 buf0 (find-file-noselect file))))
 	  (with-current-buffer buf
@@ -755,7 +784,7 @@ If the parameter FORCE is non-nil, the file will always be exported."
 			 (res (yynt--export-current-buffer fn plist))
 			 (time (yynt-get-current-time)))
 		    (if (not res) (yynt-log "fail" t)
-		      (yynt-upsert-cache
+		      (yynt-upsert-cache-1
 		       project file
 		       (cons "export_time" (car props))
 		       (cons time (cdr props)))
@@ -783,35 +812,31 @@ combine info and info-ex."
 
 (defun yynt-export-external-files (project files)
   "Export the external file list FILES in PROJECT. Return the list
-of generated file paths."
+of generated files."
   (let* ((full-files (mapcar (lambda (x) (yynt-get-file-project-fullname x project))
 			     files))
 	 res)
-    (dolist (f full-files)
+    (dolist (f full-files res)
       (if-let* ((obj (yynt-get-file-build-object f project))
 		(cov-fn (yynt-build--convert-fn obj)))
 	  (progn (yynt-export-files obj (list f) t t)
 		 (push (funcall cov-fn f) res))
-	(error "file %s not belongs to any build object" f)))
-    res))
+	(error "file %s not belongs to any build object" f)))))
 
 (defun yynt-export-build-object (bobj &optional force noexternal)
   "Export all files in BOBJ.
 
 If NOEXTERNAL is non-nil, BOBJ's ext-files will not be exported."
   (let ((type (yynt-build--type bobj)))
-    (yynt-log (format "EXPORTING [%s → %s]---------------------------"
-		      (yynt-project--name (yynt-build--project bobj))
-		      (yynt-build--name bobj))
-	      t)
+    (yynt-log (format "EXPORTING {%s → %s} ---------------------------\n"
+		      (yynt-buildm-project-name bobj)
+		      (yynt-build--name bobj)))
     (pcase type
-      (0 (let ((file (yynt-build--path bobj)))
-	   (yynt-export-files bobj (list file) nil force)))
+      (0 (let ((files-1 (yynt-buildm-collect bobj)))
+	   (yynt-export-files bobj files-1 nil force)))
       ((or 1 2)
-       (let* ((co-fn (yynt-build--collect bobj))
-	      (co-fn-ex (yynt-build--collect-ex bobj))
-	      (files-1 (funcall co-fn bobj))
-	      (files-2 (funcall co-fn-ex bobj)))
+       (let* ((files-1 (yynt-buildm-collect bobj))
+	      (files-2 (yynt-buildm-collect-ex bobj)))
 	 (yynt-export-files bobj files-1 nil force)
 	 (yynt-export-files bobj files-2 t force)))
       (_ (error "not a valid build object type: %s" type)))
@@ -821,7 +846,9 @@ If NOEXTERNAL is non-nil, BOBJ's ext-files will not be exported."
        (yynt-build--ext-files bobj)))))
 
 (defun yynt-collect-external-files (bobjs)
-  "Retrieve all ext-files from the BOBJS list."
+  "Retrieve all ext-files from the BOBJS list.
+
+BOBJS must belong to the same project."
   (let* ((all-list (mapcar #'yynt-build--ext-files bobjs))
 	 (rtn (copy-sequence (pop all-list)))
 	 ls e)
@@ -833,14 +860,36 @@ If NOEXTERNAL is non-nil, BOBJ's ext-files will not be exported."
     rtn))
 
 (defun yynt-export-build-object-list (bobjs &optional force)
-  "Export all files in the build object list BOBJS."
+  "Export all files in the build object list BOBJS.
+
+BOBJS must belong to the same project."
   (when bobjs
     (let ((ext-files (yynt-collect-external-files bobjs))
 	  (project (yynt-build--project (car bobjs))))
       (yynt-with-sqlite project
 	(dolist (b bobjs) (yynt-export-build-object b force t))
-	(yynt-export-external-files (yynt-build--project (car bobjs))
-				    ext-files)))))
+	(yynt-export-external-files project ext-files)))))
+
+(defun yynt-export-build (bname &optional force)
+  "Export selected build object."
+  (interactive (list (completing-read
+		      "Select a build object:> "
+		      (cons "*t*"
+			    (mapcar #'yynt-build--name
+				    (yynt-project--builds
+				     yynt-current-project)))
+		      nil t)
+		     current-prefix-arg))
+  (let ((start-time (float-time)))
+    (if (equal bname "*t*")
+	(yynt-export-build-object-list
+	 (yynt-project--builds yynt-current-project))
+      (let ((bobj (car (cl-member
+			bname (yynt-project--builds yynt-current-project)
+			:test #'string= :key #'yynt-build--name))))
+	(yynt-with-sqlite yynt-current-project
+	  (yynt-export-build-object bobj force))))
+    (message "export [%s] in %ss" bname (- (float-time) start-time))))
 
 (defun yynt-export-file (file &optional force)
   "Export current buffer.
@@ -857,21 +906,22 @@ If invoked with C-u, force export."
       (if (null bobj)
 	  (user-error "file %s seems not belong to one build object" file)
 	(if (eq 0 (yynt-build--type bobj))
-	    (progn
-	      (yynt-export-files bobj (list (yynt-build--path bobj)) nil force)
-	      (push (funcall conv-fn (yynt-build--path bobj)) res))
+	    (let ((files (yynt-buildm-collect bobj)))
+	      (yynt-export-files bobj files nil force)
+	      (push (yynt-buildm-convert bobj (car files)) res))
 	  (let* ((basename (yynt-get-file-build-basename file bobj)))
 	    (cond
-	     ((cl-member basename (funcall (yynt-build--collect bobj) bobj)
+	     ((cl-member basename (yynt-buildm-collect bobj)
 			 :key #'yynt-get-file-build-basename)
-	      ;; TODO: consider type-2 files?
+	      ;; FIXME: Consider exporting all files in the directory
+	      ;; where this file is located?
 	      (yynt-export-files bobj (list file) nil force)
 	      (push (funcall conv-fn file) res)
 	      ;; export ex files
-	      (let ((ex-files (funcall (yynt-build--collect-ex bobj) bobj)))
+	      (let ((ex-files (yynt-buildm-collect-ex bobj)))
 		(yynt-export-files bobj ex-files t force)
 		(dolist (f ex-files) (push (funcall conv-fn f) res-ex))))
-	     ((cl-member basename (funcall (yynt-build--collect-ex bobj) bobj)
+	     ((cl-member basename (yynt-buildm-collect-ex bobj)
 			 :key #'yynt-get-file-build-basename)
 	      (yynt-export-files bobj (list file) t force)
 	      (push (funcall conv-fn file) res-ex))
@@ -881,28 +931,6 @@ If invoked with C-u, force export."
 	(list bobj res res-ex
 	      (yynt-export-external-files
 	       project (yynt-build--ext-files bobj)))))))
-
-(defun yynt-export-build (bname &optional force)
-  "Export selected build object."
-  (interactive (list (completing-read
-		      "Select a build object:> "
-		      (cons "t"
-			    (mapcar #'yynt-build--name
-				    (yynt-project--builds
-				     yynt-current-project)))
-		      nil t)
-		     current-prefix-arg))
-  (let ((start-time (float-time)))
-    (if (equal bname "t")
-	(yynt-export-build-object-list
-	 (yynt-project--builds yynt-current-project))
-      (let ((bobj (car (cl-member
-			bname (yynt-project--builds yynt-current-project)
-			:test #'string= :key #'yynt-build--name))))
-	(yynt-with-sqlite (yynt-build--project bobj)
-	  (yynt-export-build-object bobj force))))
-    (message "export [%s] in %ss" bname (- (float-time) start-time))))
-
 
 ;;; Impl of publisher
 
