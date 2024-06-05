@@ -53,7 +53,6 @@
 
 The logger will be used to output export messages and file publish messages."
   :type 'boolean)
-
 
 ;;; Definition of yynt-project and some helper functions.
 
@@ -235,7 +234,6 @@ If PROJECT is not provided, use `yynt-current-project'."
   "Get the full path of FILE with respect to its PROJECT."
   (let ((dir (yynt-project--dir project)))
     (file-name-concat dir file)))
-
 
 ;;; Implementation of the caching functionality.
 
@@ -601,7 +599,7 @@ For type 0, the FILE parameter is not mandatory."
     (let ((ht (yynt-build--no-cache-files-ht bobj))
 	  (type (yynt-build--type bobj)))
       (pcase type
-	(0 (= (hash-table-size ht) 1))
+	(0 (= (hash-table-count ht) 1))
 	((or 1 2)
 	 (let ((name (yynt-get-file-build-basename file bobj)))
 	   (gethash name ht)))
@@ -1011,7 +1009,8 @@ and published."
   (yynt-export-build-object bobj force noexternal)
   (yynt-log (format "@PUBLISHING {%s → %s} --- %s\n"
 		    (yynt-buildm-project-name bobj)
-		    (yynt-build--name bobj)))
+		    (yynt-build--name bobj)
+		    (yynt-get-current-time)))
   (when (yynt-build-can-publish-p bobj)
     (let ((type (yynt-build--type bobj))
 	  (co-fn (yynt-build--convert-fn bobj))
@@ -1053,7 +1052,7 @@ and published."
 	(yynt-with-sqlite project
 	  (dolist (b bobjs)
 	    (yynt-publish-build-object b force t))
-	  (let* ((outfiles (yynt-export-external-files project files)))
+	  (let* ((outfiles (yynt-export-external-files project ext-files)))
 	    (yynt-publish-attach-cached
 	     project outfiles force)))))))
 
@@ -1087,13 +1086,15 @@ and published."
 		   (- (float-time) start-time)))))))
 
 (defun yynt--get-publish-file-2 (file bobj)
-  (let* ((dir-0 (file-name-directory file))
+  (let* ((bdir (yynt-build--path bobj))
+	 (dir-0 (file-name-directory file))
 	 (dir (file-name-base
 	       (directory-file-name
 		(file-name-directory file))))
 	 (pred (funcall (yynt-build--excluded-fn-2 bobj)
 			bobj dir))
-	 (files (yynt-directory-files dir))
+	 (files (let ((default-directory bdir))
+		  (yynt-directory-files dir)))
 	 (files-1 (cl-remove-if pred files)))
     (mapcar (lambda (x) (file-name-concat dir-0 x))
 	    files-1)))
@@ -1112,6 +1113,9 @@ If invoked with C-u, force publish."
 	    (export-files (append res res-ex res-ext)))
 	(if (not (yynt-build-can-publish-p bobj))
 	    (message "seems file not in a publish-able build object")
+	  (yynt-log (format "*PUBLISHING %s --- %s\n"
+			    (yynt-get-file-project-basename file proj)
+			    (yynt-get-current-time)))
 	  (yynt-with-sqlite proj
 	    (pcase (yynt-build--type bobj)
 	      ((or 0 1)
@@ -1123,11 +1127,10 @@ If invoked with C-u, force publish."
 		      proj (append resource export-files) force)
 		   (yynt-publish-attach-cached
 		    proj (append res-2 res-ex res-ext) force))))
-	      (_ (error "never happends")))
-	    (message (format "publish file in [%s] fin in %ss"
-			     (yynt-build--name bobj)
-			     (- (float-time) start-time)))))))))
-
+	      (_ (error "never happends"))))
+	  (message (format "publish file in [%s] fin in %ss"
+			   (yynt-build--name bobj)
+			   (- (float-time) start-time))))))))
 
 ;;; Utils
 
