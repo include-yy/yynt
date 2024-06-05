@@ -566,7 +566,7 @@ be published."
 
 (defun yynt-get-file-build-basename (file bobj)
   "Get the relative path of FILE with respect to its BOBJ's base directory."
-  ;; TODO: consider remove this validation step.
+  ;; FIXME: consider remove this validation step
   ;; clearify that this function only used for type 2 and 3
   (if (not (yynt-in-build-p bobj file))
       (error "file %s not in build object %s" file bobj)
@@ -598,19 +598,19 @@ Used only for files that need to be exported."
 For type 0, the FILE parameter is not mandatory."
   (if (not (yynt-project-has-cache-p (yynt-build--project bobj))) nil
     (let ((ht (yynt-build--no-cache-files-ht bobj))
-	  (path (yynt-build--path bobj))
 	  (type (yynt-build--type bobj)))
       (pcase type
-	(0 (gethash (yynt-get-file-project-basename
-		     path (yynt-build--project bobj))
-		    ht))
+	(0 (= (hash-table-size ht) 1))
 	((or 1 2)
 	 (let ((name (yynt-get-file-build-basename file bobj)))
 	   (gethash name ht)))
 	(_ (error "not a valid build-object type: %s" type))))))
 
 (defun yynt-build-can-publish-p (bobj)
-  "Determine whether BOBJ can be publish."
+  "Determine whether BOBJ can be publish.
+
+If the project to which BOBJ belongs does not have a non-nil pubdir, its
+published attribute does not take effect and it will never be published."
   (let ((project (yynt-build--project bobj)))
     (and (yynt-project-has-pubdir-p project)
 	 (yynt-build--published bobj))))
@@ -620,14 +620,11 @@ For type 0, the FILE parameter is not mandatory."
 
 If the PROJECT parameter is not provided, `yynt-current-project'
 will be used as the project for lookup."
-  (if-let* ((project (or project
-			 (cl-find-if
-			  (lambda (p) (yynt-in-project-p file p))
-			  yynt-project-list)))
-	    (bobj (cl-find-if (lambda (b) (yynt-in-build-p b file))
-			      (yynt-project--builds project))))
-      bobj
-    nil))
+  (when-let ((project (or project
+			  (cl-find-if (lambda (p) (yynt-in-project-p file p))
+				      yynt-project-list))))
+    (cl-find-if (lambda (b) (yynt-in-build-p b file))
+		(yynt-project--builds project))))
 
 ;;; Implementation of the build functionality.
 
