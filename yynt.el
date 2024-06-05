@@ -1132,25 +1132,28 @@ If invoked with C-u, force publish."
 			   (yynt-build--name bobj)
 			   (- (float-time) start-time))))))))
 
-;;; Utils
+;;; Miscellaneous Utils
 
-(defun yynt-filter-dir-items (pred &optional dir full)
-  "return a list of subdirs under DIR that satisfy PRED.
+(defun yynt-p1 (regexp)
+  (lambda (bobj)
+    (directory-files (yynt-build--path bobj) t regexp)))
 
-If specified, DIR must be full path.
-PRED takes base name as only arg.
-If FULL is non-nil, return full path."
-  (if (not dir) (setq dir default-directory)
-    (cond
-     ((not (file-exists-p dir))
-      (error "yynt: file not exists: %s" dir))
-     ((not (file-directory-p dir))
-      (error "yynt: not a directory: %s" dir))))
-  (let* ((default-directory dir)
-	 (files (yynt-directory-files dir))
-	 (res0 (cl-remove-if-not pred files))
-	 (res1 (if full (mapcar #'expand-file-name res0) res0)))
-    res1))
+(defun yynt-p1s (files)
+  (lambda (bobj)
+    (mapcar (lambda (x) (file-name-concat (yynt-build--path bobj) x))
+	    files)))
+
+(defun yynt-p2 (reg1 reg2)
+  (lambda (bobj)
+    (let ((dirs (directory-files (yynt-build--path bobj) t reg1)))
+      (cl-reduce (lambda (s a)
+		   (append (directory-files a t reg2) s))
+		 dirs :initial-value nil))))
+
+(defun yynt-e2 (reg)
+  (lambda (_bobj _path)
+    (lambda (file))
+    (string-match-p reg file)))
 
 (provide 'yynt)
 ;;; yynt.el ends here
