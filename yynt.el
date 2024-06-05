@@ -737,7 +737,7 @@ YYYY-MM-DD hh:mm:ss."
 (define-inline yynt-buildm-convert (bobj file)
   "Retrieve the export file name of FILE under BOBJ."
   (inline-letevals (bobj file)
-    (funcall (yynt-build--convert-fn ,bobj) ,file)))
+    (inline-quote (funcall (yynt-build--convert-fn ,bobj) ,file))))
 
 (defun yynt--export-current-buffer (fn plist)
   "Call the export function. If the function does not signal an
@@ -828,9 +828,10 @@ of generated files."
 
 If NOEXTERNAL is non-nil, BOBJ's ext-files will not be exported."
   (let ((type (yynt-build--type bobj)))
-    (yynt-log (format "EXPORTING {%s → %s} ---------------------------\n"
+    (yynt-log (format "+EXPORTING {%s → %s} --- %s\n"
 		      (yynt-buildm-project-name bobj)
-		      (yynt-build--name bobj)))
+		      (yynt-build--name bobj)
+		      (yynt-get-current-time)))
     (pcase type
       (0 (let ((files-1 (yynt-buildm-collect bobj)))
 	   (yynt-export-files bobj files-1 nil force)))
@@ -905,32 +906,34 @@ If invoked with C-u, force export."
 	   res res-ex)
       (if (null bobj)
 	  (user-error "file %s seems not belong to one build object" file)
-	(if (eq 0 (yynt-build--type bobj))
-	    (let ((files (yynt-buildm-collect bobj)))
-	      (yynt-export-files bobj files nil force)
-	      (push (yynt-buildm-convert bobj (car files)) res))
-	  (let* ((basename (yynt-get-file-build-basename file bobj)))
-	    (cond
-	     ((cl-member basename (yynt-buildm-collect bobj)
-			 :key #'yynt-get-file-build-basename)
-	      ;; FIXME: Consider exporting all files in the directory
-	      ;; where this file is located?
-	      (yynt-export-files bobj (list file) nil force)
-	      (push (funcall conv-fn file) res)
-	      ;; export ex files
-	      (let ((ex-files (yynt-buildm-collect-ex bobj)))
-		(yynt-export-files bobj ex-files t force)
-		(dolist (f ex-files) (push (funcall conv-fn f) res-ex))))
-	     ((cl-member basename (yynt-buildm-collect-ex bobj)
-			 :key #'yynt-get-file-build-basename)
-	      (yynt-export-files bobj (list file) t force)
-	      (push (funcall conv-fn file) res-ex))
-	     (t (user-error "file seems not a exportable file")))))
-	;; return (bobj res res-ex res-ext)
-	;; used by `yynt-publish-file'
-	(list bobj res res-ex
-	      (yynt-export-external-files
-	       project (yynt-build--ext-files bobj)))))))
+	(yynt-with-sqlite project
+	  (if (eq 0 (yynt-build--type bobj))
+	      (let ((files (yynt-buildm-collect bobj)))
+		(yynt-export-files bobj files nil force)
+		(push (yynt-buildm-convert bobj (car files)) res))
+	    (let* ((basename (yynt-get-file-build-basename file bobj))
+		   (get-fn (lambda (x) (yynt-get-file-build-basename x bobj))))
+	      (cond
+	       ((cl-member basename (yynt-buildm-collect bobj)
+			   :key get-fn :test #'string=)
+		;; FIXME: Consider exporting all files in the directory
+		;; where this file is located?
+		(yynt-export-files bobj (list file) nil force)
+		(push (funcall conv-fn file) res)
+		;; export ex files
+		(let ((ex-files (yynt-buildm-collect-ex bobj)))
+		  (yynt-export-files bobj ex-files t force)
+		  (dolist (f ex-files) (push (funcall conv-fn f) res-ex))))
+	       ((cl-member basename (yynt-buildm-collect-ex bobj)
+			   :key get-fn :test #'string=)
+		(yynt-export-files bobj (list file) t force)
+		(push (funcall conv-fn file) res-ex))
+	       (t (user-error "file seems not a exportable file")))))
+	  ;; return (bobj res res-ex res-ext)
+	  ;; used by `yynt-publish-file'
+	  (list bobj res res-ex
+		(yynt-export-external-files
+		 project (yynt-build--ext-files bobj))))))))
 
 ;;; Impl of publisher
 
