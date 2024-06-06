@@ -252,7 +252,6 @@ If PROJECT is not provided, use `yynt-current-project'."
 ;; The database has the following format:
 ;; | path | file_name | build_name | ex | fixed_field | ... | attrs  | ... |
 
-
 (defvar yynt--sqlite-obj nil
   "Temporary database object, used in conjunction with `yynt-with-sqlite'.")
 (defun yynt-open-sqlite (file)
@@ -758,7 +757,7 @@ errors will not be caught."
     (error nil)))
 
 (defun yynt--do-export ( project bobj pname bname attrs
-			 fn plist file out-file &optional force)
+			 fn plist file out-file ex &optional force)
   "Execute the specific export function, write log messages, and
 update the cache if necessary.
 
@@ -786,8 +785,11 @@ If the parameter FORCE is non-nil, the file will always be exported."
 	      (if (not res) (yynt-log "fail" t)
 		(yynt-upsert-cache-1
 		 project file
-		 (cons "export_time" (car props))
-		 (cons time (cdr props)))
+		 (append '("file_name" "build_name" "ex" "export_time")
+			 (car props))
+		 (append (list (file-name-nondirectory file)
+			       bname (if ex 1 0) time)
+			 (cdr props)))
 		(yynt-log "ok" t)))))))))
 
 (defun yynt-export-files (bobj files &optional ex force)
@@ -809,7 +811,7 @@ combine info and info-ex."
 	 (out-files (mapcar convert-fn files)))
     (cl-mapc (lambda (f g)
 	       (yynt--do-export project bobj pname bname attrs
-				fn info f g force))
+				fn info f g ex force))
 	     files out-files)))
 
 (defun yynt-export-external-files (project files)
