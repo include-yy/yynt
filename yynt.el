@@ -413,7 +413,7 @@ Create it with `yynt-create-build'."
   (info nil :documentation "(Org) export info plist.")
   (collect-ex #'ignore :documentation "(bobj) => list of other export files.")
   (info-ex nil :documentation "Export info plist for collect-ex.")
-  (fn #'ignore :documentation "Export funtion: (PLIST) => nil.")
+  (fn #'ignore :documentation "Export funtion: (PLIST OUTFILE) => nil.")
   (attrs nil :documentation "Keywords extract from source file.")
   (no-cache-files-ht nil :documentation "Files without caching.")
   (ext-files nil :documentation "External files depend on this build object.")
@@ -450,12 +450,13 @@ files that need to be exported. Type 0 projects do not require this
 parameter.
 
 INFO-EX provides export information for the files obtained from
-COLLECT-EX. It will layer over INFO and may override some of INFO's
-information.
+COLLECT-EX. It will layer over INFO and may override some of
+INFO's information.
 
 FN is the export function that will export the current buffer. It
-accepts an INFO plist as a parameter. If the function does not signal an
-error, the export is considered successful.
+accepts INFO plist and OUTFILE path as parameters. If the
+function does not signal an error, the export is considered
+successful.
 
 ATTRS is a list of keywords used to obtain metadata from the files to be
 exported. They must belong to the project's cache-items and cannot
@@ -742,7 +743,7 @@ YYYY-MM-DD hh:mm:ss."
   (inline-letevals (bobj)
     (inline-quote (funcall (yynt-build--collect-2 ,bobj) ,bobj))))
 
-(defun yynt--export-current-buffer (fn plist)
+(defun yynt--export-current-buffer (fn plist outfile)
   "Call the export function. If the function does not signal an
 error, the export is considered successful and returns t;
 otherwise, it returns nil.
@@ -750,11 +751,11 @@ otherwise, it returns nil.
 If debug-on-error is enabled through toggle-debug-on-error,
 errors will not be caught."
   (condition-case-unless-debug nil
-      (prog1 t (funcall fn plist))
+      (prog1 t (funcall fn plist outfile))
     (error nil)))
 
 (defun yynt--do-export ( project bobj pname bname attrs
-			 fn plist file &optional force)
+			 fn plist file out-file &optional force)
   "Execute the specific export function, write log messages, and
 update the cache if necessary.
 
@@ -765,34 +766,26 @@ cached export time, the file will be exported.
 If the parameter FORCE is non-nil, the file will always be exported."
   (let* ((basename (yynt-get-file-project-basename file project)))
     (yynt-log (format "[%s → %s] %s exporting... " pname bname basename))
-    (if (yynt-file-no-cache-p bobj file) ; don't need cache
-	(let* ((buf0 (get-file-buffer file))
-	       (buf (if buf0 buf0 (find-file-noselect file))))
-	  (with-current-buffer buf
-	    (unwind-protect
-		(if (yynt--export-current-buffer fn plist)
-		    (yynt-log "ok" t) (yynt-log "fail" t))
-	      (unless buf0 (kill-buffer)))))
-      (let ((btime (or (car (yynt-select-cache-1
-			     project file '("export_time")))
-		       "2000-01-01 00:00"))
-	    (ctime (yynt-get-file-ctime file)))
-	(if (and (not force) (yynt-time-less-p ctime btime))
-	    (yynt-log "skip" t)
-	  (let* ((buf0 (get-file-buffer file))
-		 (buf (if buf0 buf0 (find-file-noselect file))))
-	    (with-current-buffer buf
-	      (unwind-protect
-		  (let* ((props (yynt-get-org-keywords attrs))
-			 (res (yynt--export-current-buffer fn plist))
-			 (time (yynt-get-current-time)))
-		    (if (not res) (yynt-log "fail" t)
-		      (yynt-upsert-cache-1
-		       project file
-		       (cons "export_time" (car props))
-		       (cons time (cdr props)))
-		      (yynt-log "ok" t)))
-		(unless buf0 (kill-buffer))))))))))
+    (with-temp-buffer
+      (insert-file-contents file)
+      (if (yynt-file-no-cache-p bobj file) ; don't need cache
+	  (if (yynt--export-current-buffer fn plist out-file)
+	      (yynt-log "ok" t) (yynt-log "fail" t))
+	(let ((btime (or (car (yynt-select-cache-1
+			       project file '("export_time")))
+			 "2000-01-01 00:00"))
+	      (ctime (yynt-get-file-ctime file)))
+	  (if (and (not force) (yynt-time-less-p ctime btime))
+	      (yynt-log "skip" t)
+	    (let* ((props (yynt-get-org-keywords attrs))
+		   (res (yynt--export-current-buffer fn plist out-file))
+		   (time (yynt-get-current-time)))
+	      (if (not res) (yynt-log "fail" t)
+		(yynt-upsert-cache-1
+		 project file
+		 (cons "export_time" (car props))
+		 (cons time (cdr props)))
+		(yynt-log "ok" t)))))))))
 
 (defun yynt-export-files (bobj files &optional ex force)
   "Export the list of files FILES located under BOBJ.
@@ -808,10 +801,13 @@ combine info and info-ex."
 	 (info (if ex (yynt-combine-plists
 		       (yynt-build--info bobj)
 		       (yynt-build--info-ex bobj))
-		 (yynt-build--info bobj))))
-    (dolist (f files)
-      (yynt--do-export project bobj pname bname attrs
-		       fn info f force))))
+		 (yynt-build--info bobj)))
+	 (convert-fn (yynt-build--convert-fn bobj))
+	 (out-files (mapcar convert-fn files)))
+    (cl-mapc (lambda (f g)
+	       (yynt--do-export project bobj pname bname attrs
+				fn info f g force))
+	     files out-files)))
 
 (defun yynt-export-external-files (project files)
   "Export the external file list FILES in PROJECT. Return the list
@@ -887,7 +883,7 @@ BOBJS must belong to the same project."
   (let ((start-time (float-time)))
     (if (equal bname "*t*")
 	(yynt-export-build-object-list
-	 (yynt-project--builds yynt-current-project))
+	 (yynt-project--builds yynt-current-project) force)
       (let ((bobj (car (cl-member
 			bname (yynt-project--builds yynt-current-project)
 			:test #'string= :key #'yynt-build--name))))
@@ -1145,10 +1141,13 @@ If invoked with C-u, force publish."
 
 (defun yynt-p2 (reg1 reg2)
   (lambda (bobj)
-    (let ((dirs (directory-files (yynt-build--path bobj) t reg1)))
-      (cl-reduce (lambda (s a)
-		   (append (directory-files a t reg2) s))
-		 dirs :initial-value nil))))
+    (let ((dirs (cl-remove-if-not
+		 #'file-directory-p
+		 (directory-files (yynt-build--path bobj) t reg1)))
+	  ret)
+      (dolist (d dirs ret)
+	(dolist (f (directory-files d t reg2))
+	  (push f ret))))))
 
 (defun yynt-e2 (reg)
   (lambda (_bobj _path)
