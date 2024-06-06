@@ -413,7 +413,7 @@ Create it with `yynt-create-build'."
   (info nil :documentation "(Org) export info plist.")
   (collect-ex #'ignore :documentation "(bobj) => list of other export files.")
   (info-ex nil :documentation "Export info plist for collect-ex.")
-  (fn #'ignore :documentation "Export funtion: (PLIST OUTFILE) => nil.")
+  (fn #'ignore :documentation "Export funtion: (PLIST IN OUT) => nil.")
   (attrs nil :documentation "Keywords extract from source file.")
   (no-cache-files-ht nil :documentation "Files without caching.")
   (ext-files nil :documentation "External files depend on this build object.")
@@ -743,7 +743,7 @@ YYYY-MM-DD hh:mm:ss."
   (inline-letevals (bobj)
     (inline-quote (funcall (yynt-build--collect-2 ,bobj) ,bobj))))
 
-(defun yynt--export-current-buffer (fn plist outfile)
+(defun yynt--export-current-buffer (fn plist in out)
   "Call the export function. If the function does not signal an
 error, the export is considered successful and returns t;
 otherwise, it returns nil.
@@ -751,7 +751,7 @@ otherwise, it returns nil.
 If debug-on-error is enabled through toggle-debug-on-error,
 errors will not be caught."
   (condition-case-unless-debug nil
-      (prog1 t (funcall fn plist outfile))
+      (prog1 t (funcall fn plist in out))
     (error nil)))
 
 (defun yynt--do-export ( project bobj pname bname attrs
@@ -769,7 +769,7 @@ If the parameter FORCE is non-nil, the file will always be exported."
     (with-temp-buffer
       (insert-file-contents file)
       (if (yynt-file-no-cache-p bobj file) ; don't need cache
-	  (if (yynt--export-current-buffer fn plist out-file)
+	  (if (yynt--export-current-buffer fn plist file out-file)
 	      (yynt-log "ok" t) (yynt-log "fail" t))
 	(let ((btime (or (car (yynt-select-cache-1
 			       project file '("export_time")))
@@ -778,7 +778,7 @@ If the parameter FORCE is non-nil, the file will always be exported."
 	  (if (and (not force) (yynt-time-less-p ctime btime))
 	      (yynt-log "skip" t)
 	    (let* ((props (yynt-get-org-keywords attrs))
-		   (res (yynt--export-current-buffer fn plist out-file))
+		   (res (yynt--export-current-buffer fn plist file out-file))
 		   (time (yynt-get-current-time)))
 	      (if (not res) (yynt-log "fail" t)
 		(yynt-upsert-cache-1
