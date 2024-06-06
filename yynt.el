@@ -68,7 +68,7 @@ Set it using `yynt-choose-project'.")
 representing the current project.")
 
 (defconst yynt-project-fixed-fields
-  '("export_time" "publish_time")
+  '("file_name" "build_name" "ex" "export_time" "publish_time")
   "Inherent fields in the cache database.")
 
 (cl-defstruct (yynt-project (:conc-name yynt-project--)
@@ -210,7 +210,12 @@ NAME is the name of the project and is of symbol type."
 
 If PROJECT is not provided, use `yynt-current-project'."
   (if-let ((project (or project yynt-current-project)))
-      (file-in-directory-p file (yynt-project--dir project))
+      ;; `file-in-directory-p' is too slow
+      ;;(file-in-directory-p file (yynt-project--dir project))
+      (let* ((pdir (yynt-project--dir project))
+	     (len (length pdir)))
+	(and (>= (length file) len)
+	     (string= pdir (substring file 0 len))))
     (error "project not specified: %s" project)))
 
 (defun yynt-project-has-cache-p (project)
@@ -223,8 +228,6 @@ If PROJECT is not provided, use `yynt-current-project'."
 
 (defun yynt-get-file-project-basename (file project)
   "Get the relative path of a FILE with respect to its PROJECT."
-  ;; FIXME: Consider removing the validation step if this function is only
-  ;; called internally.
   (if (not (yynt-in-project-p file project))
       (error "file %s not in project %s" file project)
     (let ((dir (yynt-project--dir project)))
@@ -247,8 +250,8 @@ If PROJECT is not provided, use `yynt-current-project'."
 ;; individually(Instead, we can read from database).
 
 ;; The database has the following format:
-;; | path (PRIMARY KEY)             | fixed_field | ... | attrs  | ... |
-;; | path_related_to_project_root   | value       | ... | values | ... |
+;; | path | file_name | build_name | ex | fixed_field | ... | attrs  | ... |
+
 
 (defvar yynt--sqlite-obj nil
   "Temporary database object, used in conjunction with `yynt-with-sqlite'.")
