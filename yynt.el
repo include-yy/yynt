@@ -766,7 +766,8 @@ context. If the file needs to be cached and its ctime is later than the
 cached export time, the file will be exported.
 
 If the parameter FORCE is non-nil, the file will always be exported."
-  (let* ((basename (yynt-get-file-project-basename file project)))
+  (let* ((basename (yynt-get-file-project-basename file project))
+	 (default-directory (file-name-directory file)))
     (yynt-log (format "[%s → %s] %s exporting... " pname bname basename))
     (with-temp-buffer
       (insert-file-contents file)
@@ -1154,10 +1155,14 @@ If invoked with C-u, force publish."
 	(dolist (f (directory-files d t reg2))
 	  (push f ret))))))
 
+(defun yynt-c2 (reg)
+  (lambda (bobj)
+    (directory-files (yynt-build--path bobj) nil reg)))
+
 (defun yynt-e2 (reg)
   (lambda (_bobj _path)
-    (lambda (file))
-    (string-match-p reg file)))
+    (lambda (file)
+      (string-match-p reg file))))
 
 (provide 'yynt)
 ;;; yynt.el ends here
