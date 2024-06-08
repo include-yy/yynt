@@ -581,7 +581,7 @@ be published."
   "Get the relative path of FILE with respect to its BOBJ's base directory."
   ;; FIXME: consider remove this validation step
   ;; clearify that this function only used for type 2 and 3
-  (if (not (yynt-in-build-p bobj file))
+  (if (not (yynt--in-build-p bobj file))
       (error "file %s not in build object %s" file bobj)
     (let ((dir (yynt-build--path bobj)))
       (substring file (length dir)))))
@@ -591,18 +591,18 @@ be published."
   (let ((dir (yynt-build--path bobj)))
     (file-name-concat dir file)))
 
-(defun yynt-in-build-p (bobj file)
+(defun yynt--in-build-p (bobj file)
   "Determine if FILE is located within BOBJ.
 
 Used only for files that need to be exported."
   (let ((bpath (yynt-build--path bobj)))
     (pcase (yynt-build--type bobj)
-      (0 (file-equal-p bpath file))
-      (1 (file-equal-p bpath (file-name-directory file)))
-      (2 (or (file-equal-p bpath (file-name-directory file))
-	     (file-equal-p bpath (file-name-directory
-				  (directory-file-name
-				   (file-name-directory file))))))
+      (0 (string= bpath file))
+      (1 (string= bpath (file-name-directory file)))
+      (2 (or (string= bpath (file-name-directory file))
+	     (string= bpath (file-name-directory
+			     (directory-file-name
+			      (file-name-directory file))))))
       (_ (error "seems not a valid build object type")))))
 
 (defun yynt-file-no-cache-p (bobj file)
@@ -636,7 +636,7 @@ will be used as the project for lookup."
   (when-let ((project (or project
 			  (cl-find-if (lambda (p) (yynt--in-project-p file p))
 				      yynt-project-list))))
-    (cl-find-if (lambda (b) (yynt-in-build-p b file))
+    (cl-find-if (lambda (b) (yynt--in-build-p b file))
 		(yynt-project--builds project))))
 
 ;;; Implementation of the build functionality.
