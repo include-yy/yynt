@@ -579,8 +579,6 @@ be published."
 
 (defun yynt-get-file-build-basename (file bobj)
   "Get the relative path of FILE with respect to its BOBJ's base directory."
-  ;; FIXME: consider remove this validation step
-  ;; clearify that this function only used for type 2 and 3
   (if (not (yynt--in-build-p bobj file))
       (error "file %s not in build object %s" file bobj)
     (let ((dir (yynt-build--path bobj)))
@@ -605,7 +603,7 @@ Used only for files that need to be exported."
 			      (file-name-directory file))))))
       (_ (error "seems not a valid build object type")))))
 
-(defun yynt-file-no-cache-p (bobj file)
+(defun yynt--file-no-cache-p (bobj file)
   "Determine if FILE is in no-cache-files-ht.
 
 For type 0, the FILE parameter is not mandatory."
@@ -619,7 +617,7 @@ For type 0, the FILE parameter is not mandatory."
 	   (gethash name ht)))
 	(_ (error "not a valid build-object type: %s" type))))))
 
-(defun yynt-build-can-publish-p (bobj)
+(defun yynt--build-can-publish-p (bobj)
   "Determine whether BOBJ can be publish.
 
 If the project to which BOBJ belongs does not have a non-nil pubdir, its
@@ -633,9 +631,7 @@ published attribute does not take effect and it will never be published."
 
 If the PROJECT parameter is not provided, `yynt-current-project'
 will be used as the project for lookup."
-  (when-let ((project (or project
-			  (cl-find-if (lambda (p) (yynt--in-project-p file p))
-				      yynt-project-list))))
+  (when-let ((project (or project yynt-current-project)))
     (cl-find-if (lambda (b) (yynt--in-build-p b file))
 		(yynt-project--builds project))))
 
@@ -782,7 +778,7 @@ If the parameter FORCE is non-nil, the file will always be exported."
     (yynt-log (format "[%s → %s] %s exporting... " pname bname basename))
     (with-temp-buffer
       (insert-file-contents file)
-      (if (yynt-file-no-cache-p bobj file) ; don't need cache
+      (if (yynt--file-no-cache-p bobj file) ; don't need cache
 	  (if (yynt--export-current-buffer fn plist file out-file)
 	      (yynt-log "ok" t) (yynt-log "fail" t))
 	(let ((btime (or (car (yynt--select-cache
@@ -918,7 +914,7 @@ If invoked with C-u, force export."
       (user-error "buffer seems not have `buffer-file-name'")
     (let* ((bobj (yynt-get-file-build-object file)))
       (if (null bobj)
-	  (user-error "file %s seems not belong to one build object" file)
+	  (user-error "file %s seems not belong to current project's build object" file)
 	(let* ((project (yynt-build--project bobj))
 	       (conv-fn (yynt-build--convert-fn bobj))
 	       res res-ex)
@@ -1024,7 +1020,7 @@ and published."
 		    (yynt-buildm-project-name bobj)
 		    (yynt-build--name bobj)
 		    (yynt-get-current-time)))
-  (when (yynt-build-can-publish-p bobj)
+  (when (yynt--build-can-publish-p bobj)
     (let ((type (yynt-build--type bobj))
 	  (co-fn (yynt-build--convert-fn bobj))
 	  (project (yynt-build--project bobj)))
@@ -1058,7 +1054,7 @@ and published."
 
 (defun yynt-publish-build-object-list (bobjs &optional force)
   "Export and Publish all files in BOBJS list"
-  (let ((bobjs (cl-remove-if-not #'yynt-build-can-publish-p bobjs)))
+  (let ((bobjs (cl-remove-if-not #'yynt--build-can-publish-p bobjs)))
     (when bobjs
       (let* ((ext-files (yynt-collect-external-files bobjs))
 	     (project (yynt-build--project (car bobjs))))
@@ -1081,7 +1077,7 @@ and published."
   (let ((start-time (float-time)))
     (if (equal bname "*t*")
 	(let ((objs (cl-remove-if-not
-		     #'yynt-build-can-publish-p
+		     #'yynt--build-can-publish-p
 		     (yynt-project--builds yynt-current-project))))
 	  (yynt-publish-build-object-list objs force)
 	  (message "publish project [%s] in %ss"
@@ -1089,7 +1085,7 @@ and published."
       (let ((bobj (car (cl-member
 			bname (yynt-project--builds yynt-current-project)
 			:test #'string= :key #'yynt-build--name))))
-	(if (not (yynt-build-can-publish-p bobj))
+	(if (not (yynt--build-can-publish-p bobj))
 	    (message "seems not a publish-able bobj: [%s]"
 		     (yynt-build--name bobj))
 	  (yynt-with-sqlite (yynt-build--project bobj)
@@ -1124,7 +1120,7 @@ If invoked with C-u, force publish."
       (let ((proj (yynt-build--project bobj))
 	    (resource (yynt-build--included-resources bobj))
 	    (export-files (append res res-ex res-ext)))
-	(if (not (yynt-build-can-publish-p bobj))
+	(if (not (yynt--build-can-publish-p bobj))
 	    (message "seems file not in a publish-able build object")
 	  (yynt-log (format "*PUBLISHING %s --- %s\n"
 			    (yynt-get-file-project-basename file proj)
