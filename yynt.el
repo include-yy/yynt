@@ -69,7 +69,23 @@ representing the current project.")
 
 (defconst yynt-project-fixed-fields
   '("file_name" "build_name" "ex" "export_time" "publish_time")
-  "Inherent fields in the cache database.")
+  "Inherent fields in the cache database.
+
+All tables use the relative \"PATH\" of the file, relative to the PROJECT
+directory, as the primary key.
+
+FILE_NAME is the name of the file, without any directory prefixes.
+
+BUILD_NAME is the name of the BUILD_OBJECT to which the file belongs.
+
+EX indicates whether the file comes from the collect-ex function of the
+BUILD OBJECT. If it is 1, it comes from collect-ex; otherwise(0), it
+comes from the collect function.
+
+EXPORT_TIME records the export time of the file in UTC+0.
+
+PUBLISH_TIME records the publication time of the file, only used for
+exported files and resources that need to be published.")
 
 (cl-defstruct (yynt-project (:conc-name yynt-project--)
 			    (:constructor yynt-project--make)
@@ -77,9 +93,7 @@ representing the current project.")
   "Struct definition for yynt projects. Create it with `yynt-create-project'.
 
 Please create a build object belonging to the project by calling
-`yynt-create-build' after calling `yynt-create-project'.
-
-If cache is nil, the caching mechanism is not used."
+`yynt-create-build' after calling `yynt-create-project'."
   (name nil :documentation "Symbol of the project name.")
   (dir nil :documentation "Full path of the project.")
   (pubdir nil :documentation "Full path of the publish directory.")
@@ -118,10 +132,10 @@ A relative path cannot start with \"/\"."
 NAME is the name symbol of the project, which must be a non-nil and
 non-keyword symbol.
 
-PUBDIR is the publish directory, which must be of `string' type
-or nil (means no need to publish). If it is a relative path, it
-is relative to DIRECTORY. PUBDIR and DIRECTORY cannot be the same
-directory.
+PUBDIR is the publish directory, which must be of `string' type or
+nil (means no need to publish). If it is a relative path, it is relative
+to DIRECTORY. PUBDIR and DIRECTORY cannot be the same directory. If
+PUBDIR is nil, the entire project will not be exported.
 
 CACHE can be nil or the path to the cache file. If it is a relative
 path, it is relative to the DIRECTORY. If CACHE is nil, it indicates
@@ -158,10 +172,10 @@ provided, it will use `default-directory' as the default value."
   ;; Normalization of the publish directory
   (unless (or (null pubdir) (file-name-absolute-p pubdir))
     (setq pubdir (expand-file-name pubdir directory)))
-  (when (file-equal-p directory pubdir)
+  (when (and pudir (file-equal-p directory pubdir)) ; pubdir could be nil
     (error "pubdir and directory are the same directory: %s" directory))
-  ;; Create Publish directory if not exists
-  (unless (file-exists-p pubdir)
+  ;; Create Publish directory if pub is non-nil and not exists
+  (unless (or (null pubdir) (file-exists-p pubdir))
     (make-directory pubdir t))
   ;; Normalization of the cache file path
   (unless (or (null cache) (file-name-absolute-p cache))
@@ -184,7 +198,6 @@ provided, it will use `default-directory' as the default value."
     (setq yynt-project-list
 	  (cons project (cl-delete name yynt-project-list
 				   :key #'yynt-project--name)))
-
     ;; Initialize cache if necessary
     (when cache
       (yynt-initialize-cache project))
@@ -201,7 +214,7 @@ NAME is the name of the project and is of symbol type."
 			      (mapcar #'yynt-project--name yynt-project-list)
 			      nil t))))
   (if-let ((project (car-safe (cl-member name yynt-project-list
-				      :key #'yynt-project--name))))
+					 :key #'yynt-project--name))))
       (setq yynt-current-project project)
     (user-error "Seems not a exist project object's name: %s" name)))
 
