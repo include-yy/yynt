@@ -213,18 +213,16 @@ NAME is the name of the project and is of symbol type."
       (setq yynt-current-project project)
     (user-error "Seems not a exist project object's name: %s" name)))
 
-(defun yynt-in-project-p (file &optional project)
-  "Determine if a file is located within the project.
-
-If PROJECT is not provided, use `yynt-current-project'."
-  (if-let ((project (or project yynt-current-project)))
+(defun yynt-in-project-p (file project)
+  "Determine if a file is located within the project."
+  (if (yynt-project-p project)
       ;; `file-in-directory-p' is too slow
       ;;(file-in-directory-p file (yynt-project--dir project))
       (let* ((pdir (yynt-project--dir project))
 	     (len (length pdir)))
 	(and (>= (length file) len)
 	     (string= pdir (substring file 0 len))))
-    (error "project not specified: %s" project)))
+    (error "not a valid project: %s" project)))
 
 (defun yynt-project-has-cache-p (project)
   "Determine whether PROJECT object uses the caching mechanism."
@@ -258,7 +256,7 @@ If PROJECT is not provided, use `yynt-current-project'."
 ;; individually(Instead, we can read from database).
 
 ;; The database has the following format:
-;; | path | file_name | build_name | ex | fixed_field | ... | attrs  | ... |
+;; | path | fixed_field | ... | attrs  | ... |
 
 (defvar yynt--sqlite-obj nil
   "Temporary database object, used in conjunction with `yynt-with-sqlite'.")
