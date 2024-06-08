@@ -324,12 +324,11 @@ same name."
 			(format "CREATE TABLE yynt (path PRIMARY KEY,%s)"
 				(mapconcat #'identity fields ",")))))))
 
-(defun yynt-clear-cache (project)
+(defun yynt--clear-cache ()
   "Clear the table YYNT."
-  (yynt-with-sqlite project
-    (sqlite-execute yynt--sqlite-obj "DELETE FROM yynt;")))
+  (sqlite-execute yynt--sqlite-obj "DELETE FROM yynt;"))
 
-(defun yynt-upsert-cache-1 (project file keys values)
+(defun yynt--upsert-cache (project file keys values)
   "Update or insert a row: update if the file already exists, otherwise insert.
 
 Ensure that `yynt--sqlite-obj' belongs to the PROJECT."
@@ -340,23 +339,14 @@ Ensure that `yynt--sqlite-obj' belongs to the PROJECT."
 			      (cons base values) ","))
 	 (kv-seq (mapconcat (lambda (x) (format "%s='%s'" (car x) (cdr x)))
 			    (cl-mapcar #'cons keys values) ",")))
-    ;; FIXME: Condier remove this validation if possible.
-    (if (not (cl-subsetp keys items :test #'string=))
-	(error "some keys not belong to cache-items: (%s, %s)"
-	       keys items)
-      (sqlite-execute
-       yynt--sqlite-obj
-       (format "\
+    (sqlite-execute
+     yynt--sqlite-obj
+     (format "\
 INSERT INTO yynt (%s) VALUES (%s)
 ON CONFLICT(path) DO UPDATE SET %s"
-	       k-fields v-fields kv-seq)))))
+	     k-fields v-fields kv-seq))))
 
-(defun yynt-upsert-cache (project file keys values)
-  "Do upsert operation under sqlite context."
-  (yynt-with-sqlite project
-    (yynt-upsert-cache-1 project file keys values)))
-
-(defun yynt-delete-cache-1 (project file)
+(defun yynt--delete-cache (project file)
   "Delete a row using FILE as the primary key, if it exists.
 
 Ensure that `yynt--sqlite-obj' belongs to the PROJECT."
@@ -365,12 +355,7 @@ Ensure that `yynt--sqlite-obj' belongs to the PROJECT."
      yynt--sqlite-obj
      "DELETE FROM yynt WHERE path=?" (list key))))
 
-(defun yynt-delete-cache (project file)
-  "Do delete operation udner sqlite context."
-  (yynt-with-sqlite project
-    (yynt-delete-cache-1 project file)))
-
-(defun yynt-select-cache-1 (project file keys)
+(defun yynt--select-cache (project file keys)
   "Retrieve a record from the database.
 
 Ensure that `yynt--sqlite-obj' belongs to the PROJECT."
@@ -380,11 +365,6 @@ Ensure that `yynt--sqlite-obj' belongs to the PROJECT."
     (format "SELECT %s FROM yynt where path='%s'"
 	    (mapconcat #'identity keys ",")
 	    (yynt-get-file-project-basename file project)))))
-
-(defun yynt-select-cache (project file keys)
-  "Do select operation under sqlite context."
-  (yynt-with-sqlite project
-    (yynt-select-cache-1 project file keys)))
 
 ;;; Definition of yynt-build and some helper functions.
 
@@ -776,7 +756,7 @@ If the parameter FORCE is non-nil, the file will always be exported."
       (if (yynt-file-no-cache-p bobj file) ; don't need cache
 	  (if (yynt--export-current-buffer fn plist file out-file)
 	      (yynt-log "ok" t) (yynt-log "fail" t))
-	(let ((btime (or (car (yynt-select-cache-1
+	(let ((btime (or (car (yynt--select-cache
 			       project file '("export_time")))
 			 "2000-01-01 00:00"))
 	      (ctime (yynt-get-file-ctime file)))
@@ -786,7 +766,7 @@ If the parameter FORCE is non-nil, the file will always be exported."
 		   (res (yynt--export-current-buffer fn plist file out-file))
 		   (time (yynt-get-current-time)))
 	      (if (not res) (yynt-log "fail" t)
-		(yynt-upsert-cache-1
+		(yynt--upsert-cache
 		 project file
 		 (append '("file_name" "build_name" "ex" "export_time")
 			 (car props))
@@ -975,7 +955,7 @@ If FORCE is non-nil, FILE will always be published."
       (if (not (yynt--project-has-cache-p project))
 	  (progn (yynt-publish-attachment file pub-dir)
 		 (yynt-log (format "(%s) %s published" pname file) t))
-	(let ((ptime (or (car (yynt-select-cache-1 project file
+	(let ((ptime (or (car (yynt--select-cache project file
 						   '("publish_time")))
 			 "2000-01-01 00:00"))
 	      (ctime (yynt-get-file-ctime file)))
@@ -984,7 +964,7 @@ If FORCE is non-nil, FILE will always be published."
 				pname rela-file)
 			t)
 	    (yynt-publish-attachment file pub-dir)
-	    (yynt-upsert-cache-1 project file '("publish_time")
+	    (yynt--upsert-cache project file '("publish_time")
 				 (list (yynt-get-current-time)))
 	    (yynt-log (format "(%s) %s published" pname rela-file) t)))))))
 
