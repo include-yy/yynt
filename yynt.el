@@ -63,10 +63,6 @@ The logger will be used to output export messages and file publish messages."
 
 Set it using `yynt-choose-project'.")
 
-(defvar yynt--temp-project nil
-  "Temporary variable used for the creation phase,
-representing the current project.")
-
 (defconst yynt-project-fixed-fields
   '("file_name" "build_name" "ex" "export_time" "publish_time")
   "Inherent fields in the cache database.
@@ -201,7 +197,6 @@ provided, it will use `default-directory' as the default value."
     ;; Initialize cache if necessary
     (when cache
       (yynt-initialize-cache project))
-    (setq yynt--temp-project project)
     project))
 
 (defun yynt-choose-project (name)
@@ -444,8 +439,7 @@ Create it with `yynt-create-build'."
 				  collect-2 excluded-fn-2)
   "Create a new `yynt-build' object.
 
-If PROJECT is provided, it will be used as the project object pointed to
-by the build object. Otherwise, `yynt--temp-project' will be used.
+PROJECT is used as the project object pointed to by the build object.
 
 PATH is a path string relative to the project path.
 
@@ -502,7 +496,6 @@ predicate function. PATH is the path relative to the bobj directory that
 contains resources. The returned predicate function returns nil for file
 names that need to be published and t for file names that do not need to
 be published."
-  (unless project (setq project yynt--temp-project))
   (unless (yynt-project-p project)
     (error "seems not a valid yynt-project: %s" project))
   (unless (and (integerp type) (<= 0 type 2))
