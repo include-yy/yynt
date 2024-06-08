@@ -196,7 +196,7 @@ provided, it will use `default-directory' as the default value."
 				   :key #'yynt-project--name)))
     ;; Initialize cache if necessary
     (when cache
-      (yynt-initialize-cache project))
+      (yynt--initialize-cache project))
     project))
 
 (defun yynt-choose-project (name)
@@ -258,10 +258,10 @@ NAME is the name of the project and is of symbol type."
 
 (defvar yynt--sqlite-obj nil
   "Temporary database object, used in conjunction with `yynt-with-sqlite'.")
-(defun yynt-open-sqlite (file)
+(defun yynt--open-sqlite (file)
   "Call `sqlite-open' to open FILE and return an sqlite3 database object."
   (sqlite-open file))
-(defun yynt-close-sqlite (obj)
+(defun yynt--close-sqlite (obj)
   "Call `sqlite-close' to close the database object."
   (when (sqlitep obj) (sqlite-close obj)))
 (defmacro yynt-with-sqlite (project &rest body)
@@ -274,11 +274,11 @@ macro is equivalent to progn."
   (let ((proj (gensym)))
     `(let* ((,proj ,project)
 	    (cache (yynt-project--cache ,proj))
-	    (yynt--sqlite-obj (when cache (yynt-open-sqlite cache))))
+	    (yynt--sqlite-obj (when cache (yynt--open-sqlite cache))))
        (unwind-protect ,(cons 'progn body)
-	 (yynt-close-sqlite yynt--sqlite-obj)))))
+	 (yynt--close-sqlite yynt--sqlite-obj)))))
 
-(defun yynt-initialize-cache (project)
+(defun yynt--initialize-cache (project)
   "Initialize the cache database, creating table YYNT if not exist.
 
 If the table YYNT already exists, this function will check if the
