@@ -365,6 +365,35 @@ Ensure that `yynt--sqlite-obj' belongs to the PROJECT."
     (format "SELECT %s FROM yynt where path='%s'"
 	    (mapconcat #'identity keys ",")
 	    (yynt-get-file-project-basename file project)))))
+
+;; We don't provide `yynt-execute', it is dangerous.
+;; If you really want to manually modify the database, please use the following
+;; functions with caution.
+
+;; (defun yynt-execute (project query context &optional values)
+;;   (unless (yynt-project-p project)
+;;     (error "not a valid yynt-project: %s" project))
+;;   (unless (yynt--project-has-cache-p project)
+;;     (error "project has no cache file: %s" (yynt-project--name project)))
+;;   (if (null context)
+;;       (sqlite-execute yynt--sqlite-obj query values)
+;;     (yynt-with-sqlite project
+;;       (sqlite-execute yynt--sqlite-obj query values))))
+
+(defun yynt-select (project query context &optional values return-type)
+  "Select data from PROJECT cache database that matches QUERY.
+
+If context is non-nil, call `sqlite-select' with sqlite context.
+
+For the argument VALUES and RETURN-TYPE, see `sqlite-select' docstring."
+  (unless (yynt-project-p project)
+    (error "not a valid yynt-project: %s" project))
+  (unless (yynt--project-has-cache-p project)
+    (error "project has no cache file: %s" (yynt-project--name project)))
+  (if (null context)
+      (sqlite-select yynt--sqlite-obj query values return-type)
+    (yynt-with-sqlite project
+      (sqlite-select yynt--sqlite-obj query values return-type))))
 
 ;;; Definition of yynt-build and some helper functions.
 
