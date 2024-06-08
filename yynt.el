@@ -533,9 +533,9 @@ be published."
     (error "not a valid convert-fn: %s" convert-fn))
   (unless (cl-every #'yynt--valid-rela-filename-p included-resources)
     (error "not a valid included-resources: %s" included-resources))
-  (when (and (eq type 2) (not (functionp collect-2)))
+  (when (and (eq type 2) published (not (functionp collect-2)))
     (error "not a valid collect-2 function: %s" collect-2))
-  (when (and (eq type 2) (not (functionp excluded-fn-2)))
+  (when (and (eq type 2) published (not (functionp excluded-fn-2)))
     (error "not a valid excluded-fn-2 function: %s" excluded-fn-2))
   (let* ((project-dir (yynt-project--dir project))
 	 (full-path (expand-file-name path project-dir))
@@ -550,7 +550,7 @@ be published."
 		 (dolist (x no-cache-files ht) (puthash x t ht)))))
 	 ;; generate a collect function for type-0
 	 (collect (if (not (and (eq type 0) (null collect))) collect
-		      (lambda (_bobj) `(,build-path))))
+		    (let ((x `(,build-path))) (lambda (_bobj) x))))
 	 ;; translate include-resources to full path
 	 ;; note for type-0 build object, we use project's dir as base dir
 	 (i-res (if (eq type 0)
