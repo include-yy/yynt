@@ -213,28 +213,26 @@ NAME is the name of the project and is of symbol type."
       (setq yynt-current-project project)
     (user-error "Seems not a exist project object's name: %s" name)))
 
-(defun yynt-in-project-p (file project)
+(defun yynt--in-project-p (file project)
   "Determine if a file is located within the project."
-  (if (yynt-project-p project)
-      ;; `file-in-directory-p' is too slow
-      ;;(file-in-directory-p file (yynt-project--dir project))
-      (let* ((pdir (yynt-project--dir project))
-	     (len (length pdir)))
-	(and (>= (length file) len)
-	     (string= pdir (substring file 0 len))))
-    (error "not a valid project: %s" project)))
+  ;; `file-in-directory-p' is too slow
+  ;;(file-in-directory-p file (yynt-project--dir project))
+  (let* ((pdir (yynt-project--dir project))
+	 (len (length pdir)))
+    (and (>= (length file) len)
+	 (string= pdir (substring file 0 len)))))
 
-(defun yynt-project-has-cache-p (project)
+(defun yynt--project-has-cache-p (project)
   "Determine whether PROJECT object uses the caching mechanism."
   (yynt-project--cache project))
 
-(defun yynt-project-has-pubdir-p (project)
+(defun yynt--project-has-pubdir-p (project)
   "Determine whether PROJECT has pubdir"
   (yynt-project--pubdir project))
 
 (defun yynt-get-file-project-basename (file project)
   "Get the relative path of a FILE with respect to its PROJECT."
-  (if (not (yynt-in-project-p file project))
+  (if (not (yynt--in-project-p file project))
       (error "file %s not in project %s" file project)
     (let ((dir (yynt-project--dir project)))
       (substring file (length dir)))))
@@ -602,7 +600,7 @@ Used only for files that need to be exported."
   "Determine if FILE is in no-cache-files-ht.
 
 For type 0, the FILE parameter is not mandatory."
-  (if (not (yynt-project-has-cache-p (yynt-build--project bobj))) nil
+  (if (not (yynt--project-has-cache-p (yynt-build--project bobj))) nil
     (let ((ht (yynt-build--no-cache-files-ht bobj))
 	  (type (yynt-build--type bobj)))
       (pcase type
@@ -618,7 +616,7 @@ For type 0, the FILE parameter is not mandatory."
 If the project to which BOBJ belongs does not have a non-nil pubdir, its
 published attribute does not take effect and it will never be published."
   (let ((project (yynt-build--project bobj)))
-    (and (yynt-project-has-pubdir-p project)
+    (and (yynt--project-has-pubdir-p project)
 	 (yynt-build--published bobj))))
 
 (defun yynt-get-file-build-object (file &optional project)
@@ -627,7 +625,7 @@ published attribute does not take effect and it will never be published."
 If the PROJECT parameter is not provided, `yynt-current-project'
 will be used as the project for lookup."
   (when-let ((project (or project
-			  (cl-find-if (lambda (p) (yynt-in-project-p file p))
+			  (cl-find-if (lambda (p) (yynt--in-project-p file p))
 				      yynt-project-list))))
     (cl-find-if (lambda (b) (yynt-in-build-p b file))
 		(yynt-project--builds project))))
@@ -968,13 +966,13 @@ and update the cache if necessary.
 If FORCE is non-nil, FILE will always be published."
   ;; TODO: consider make validation simpler
   (when (and (file-exists-p file)
-	     (yynt-in-project-p file project))
+	     (yynt--in-project-p file project))
     (let* ((pname (yynt-project--name project))
 	   (rela-file (yynt-get-file-project-basename file project))
 	   (rela-dir (file-name-directory rela-file))
 	   (pub-dir (file-name-concat (yynt-project--pubdir project)
 				      rela-dir)))
-      (if (not (yynt-project-has-cache-p project))
+      (if (not (yynt--project-has-cache-p project))
 	  (progn (yynt-publish-attachment file pub-dir)
 		 (yynt-log (format "(%s) %s published" pname file) t))
 	(let ((ptime (or (car (yynt-select-cache-1 project file
