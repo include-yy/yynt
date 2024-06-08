@@ -658,7 +658,7 @@ will be used as the project for lookup."
       (when (not (equal major-mode 'messages-buffer-mode))
 	(messages-buffer-mode)))
     buf))
-(defun yynt-log (message &optional newline)
+(defun yynt--log (message &optional newline)
   "Write a log message to buffer named `yynt--log-buffer'.
 
 If NEWLINE is non-nil, this function will add a newline at the
@@ -690,7 +690,7 @@ Copied from `org-combine-plists'"
 	(setq rtn (plist-put rtn p v))))
     rtn))
 
-(defun yynt-get-org-keywords (infos)
+(defun yynt--get-org-keywords (infos)
   "Get (keyword . value) alist from the head of current buffer.
 
 INFOS is a list of keywords, keywords are
@@ -711,18 +711,18 @@ Get from https://github.com/bastibe/org-static-blog."
     (cons res-key res-val)))
 
 ;; Time functions.
-(defun yynt-get-file-ctime (filepath)
+(defun yynt--get-file-ctime (filepath)
   "Get file's ctime, utc+0."
   (format-time-string
    "%Y-%m-%d %T"
    (nth 5 (file-attributes filepath)) t))
 
-(defun yynt-get-current-time ()
+(defun yynt--get-current-time ()
   "Get the current UTC+0 time as a string in the format
 YYYY-MM-DD hh:mm:ss."
   (format-time-string "%Y-%m-%d %T" (current-time) t))
 
-(defun yynt-time-less-p (st1 st2)
+(defun yynt--time-less-p (st1 st2)
   "Tell if st1's time is less than st2. Time format must be
  YYYY-MM-DD hh:mm:ss"
   (time-less-p (date-to-time st1)
@@ -775,22 +775,22 @@ cached export time, the file will be exported.
 If the parameter FORCE is non-nil, the file will always be exported."
   (let* ((basename (yynt-get-file-project-basename file project))
 	 (default-directory (file-name-directory file)))
-    (yynt-log (format "[%s → %s] %s exporting... " pname bname basename))
+    (yynt--log (format "[%s → %s] %s exporting... " pname bname basename))
     (with-temp-buffer
       (insert-file-contents file)
       (if (yynt--file-no-cache-p bobj file) ; don't need cache
 	  (if (yynt--export-current-buffer fn plist file out-file)
-	      (yynt-log "ok" t) (yynt-log "fail" t))
+	      (yynt--log "ok" t) (yynt--log "fail" t))
 	(let ((btime (or (car (yynt--select-cache
 			       project file '("export_time")))
 			 "2000-01-01 00:00"))
-	      (ctime (yynt-get-file-ctime file)))
-	  (if (and (not force) (yynt-time-less-p ctime btime))
-	      (yynt-log "skip" t)
-	    (let* ((props (yynt-get-org-keywords attrs))
+	      (ctime (yynt--get-file-ctime file)))
+	  (if (and (not force) (yynt--time-less-p ctime btime))
+	      (yynt--log "skip" t)
+	    (let* ((props (yynt--get-org-keywords attrs))
 		   (res (yynt--export-current-buffer fn plist file out-file))
-		   (time (yynt-get-current-time)))
-	      (if (not res) (yynt-log "fail" t)
+		   (time (yynt--get-current-time)))
+	      (if (not res) (yynt--log "fail" t)
 		(yynt--upsert-cache
 		 project file
 		 (append '("file_name" "build_name" "ex" "export_time")
@@ -798,7 +798,7 @@ If the parameter FORCE is non-nil, the file will always be exported."
 		 (append (list (file-name-nondirectory file)
 			       bname (if ex 1 0) time)
 			 (cdr props)))
-		(yynt-log "ok" t)))))))))
+		(yynt--log "ok" t)))))))))
 
 (defun yynt-export-files (bobj files &optional ex force)
   "Export the list of files FILES located under BOBJ.
@@ -840,14 +840,15 @@ of generated files."
 
 If NOEXTERNAL is non-nil, BOBJ's ext-files will not be exported."
   (let ((type (yynt-build--type bobj)))
-    (yynt-log (format "+EXPORTING {%s → %s} --- %s\n"
+    (yynt--log (format "+EXPORTING {%s → %s} --- %s\n"
 		      (yynt-buildm-project-name bobj)
 		      (yynt-build--name bobj)
-		      (yynt-get-current-time)))
+		      (yynt--get-current-time)))
     (pcase type
       (0 (let ((files-1 (yynt-buildm-collect bobj)))
 	   (yynt-export-files bobj files-1 nil force)))
       ((or 1 2)
+       
        (let* ((files-1 (yynt-buildm-collect bobj))
 	      (files-2 (yynt-buildm-collect-ex bobj)))
 	 (yynt-export-files bobj files-1 nil force)
@@ -979,19 +980,19 @@ If FORCE is non-nil, FILE will always be published."
 				      rela-dir)))
       (if (not (yynt--project-has-cache-p project))
 	  (progn (yynt-publish-attachment file pub-dir)
-		 (yynt-log (format "(%s) %s published" pname file) t))
+		 (yynt--log (format "(%s) %s published" pname file) t))
 	(let ((ptime (or (car (yynt--select-cache project file
 						   '("publish_time")))
 			 "2000-01-01 00:00"))
-	      (ctime (yynt-get-file-ctime file)))
-	  (if (and (not force) (yynt-time-less-p ctime ptime))
-	      (yynt-log (format "(%s) %s skipped"
+	      (ctime (yynt--get-file-ctime file)))
+	  (if (and (not force) (yynt--time-less-p ctime ptime))
+	      (yynt--log (format "(%s) %s skipped"
 				pname rela-file)
 			t)
 	    (yynt-publish-attachment file pub-dir)
 	    (yynt--upsert-cache project file '("publish_time")
-				 (list (yynt-get-current-time)))
-	    (yynt-log (format "(%s) %s published" pname rela-file) t)))))))
+				 (list (yynt--get-current-time)))
+	    (yynt--log (format "(%s) %s published" pname rela-file) t)))))))
 
 (defun yynt-publish-attach-dir-cached (project dir &optional force)
   "Publish DIR recursively to PROJECT pubdir."
@@ -1016,10 +1017,10 @@ If FORCE is non-nil, FILE will always be published."
 If NOEXTERNAL is non-nil, BOBJ ext-files will not be exported
 and published."
   (yynt-export-build-object bobj force noexternal)
-  (yynt-log (format "@PUBLISHING {%s → %s} --- %s\n"
+  (yynt--log (format "@PUBLISHING {%s → %s} --- %s\n"
 		    (yynt-buildm-project-name bobj)
 		    (yynt-build--name bobj)
-		    (yynt-get-current-time)))
+		    (yynt--get-current-time)))
   (when (yynt--build-can-publish-p bobj)
     (let ((type (yynt-build--type bobj))
 	  (co-fn (yynt-build--convert-fn bobj))
@@ -1122,9 +1123,9 @@ If invoked with C-u, force publish."
 	    (export-files (append res res-ex res-ext)))
 	(if (not (yynt--build-can-publish-p bobj))
 	    (message "seems file not in a publish-able build object")
-	  (yynt-log (format "*PUBLISHING %s --- %s\n"
+	  (yynt--log (format "*PUBLISHING %s --- %s\n"
 			    (yynt-get-file-project-basename file proj)
-			    (yynt-get-current-time)))
+			    (yynt--get-current-time)))
 	  (yynt-with-sqlite proj
 	    (pcase (yynt-build--type bobj)
 	      ((or 0 1)
