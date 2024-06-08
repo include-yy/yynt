@@ -168,7 +168,7 @@ provided, it will use `default-directory' as the default value."
   ;; Normalization of the publish directory
   (unless (or (null pubdir) (file-name-absolute-p pubdir))
     (setq pubdir (expand-file-name pubdir directory)))
-  (when (and pudir (file-equal-p directory pubdir)) ; pubdir could be nil
+  (when (and pubdir (file-equal-p directory pubdir)) ; pubdir could be nil
     (error "pubdir and directory are the same directory: %s" directory))
   ;; Create Publish directory if pub is non-nil and not exists
   (unless (or (null pubdir) (file-exists-p pubdir))
@@ -295,7 +295,7 @@ same name."
 		;; https://www.sqlite.org/pragma.html#pragma_table_info
 		;; | cid | name | type | notnull | dflt_value | pk |
 		(old-fields (mapcar (lambda (ls) (nth 1 ls)) info)))
-	  (unless (equal fields old-fields)
+	  (unless (equal fields (cdr old-fields)) ; ignore path
 	    (let* ((new (mapconcat #'identity fields ","))
 		   (shr (mapconcat
 			 #'identity
