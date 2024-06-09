@@ -773,8 +773,7 @@ context. If the file needs to be cached and its ctime is later than the
 cached export time, the file will be exported.
 
 If the parameter FORCE is non-nil, the file will always be exported."
-  (let* ((basename (yynt-get-file-project-basename file project))
-	 (default-directory (file-name-directory file)))
+  (let* ((basename (yynt-get-file-project-basename file project)))
     (yynt--log (format "[%s → %s] %s exporting... " pname bname basename))
     (with-temp-buffer
       (insert-file-contents file)
@@ -848,7 +847,6 @@ If NOEXTERNAL is non-nil, BOBJ's ext-files will not be exported."
       (0 (let ((files-1 (yynt-buildm-collect bobj)))
 	   (yynt-export-files bobj files-1 nil force)))
       ((or 1 2)
-       
        (let* ((files-1 (yynt-buildm-collect bobj))
 	      (files-2 (yynt-buildm-collect-ex bobj)))
 	 (yynt-export-files bobj files-1 nil force)
@@ -931,6 +929,7 @@ If invoked with C-u, force export."
 			     :key get-fn :test #'string=)
 		  ;; FIXME: Consider exporting all files in the directory
 		  ;; where this file is located?
+		  ;; Maybe C-u C-u ...
 		  (yynt-export-files bobj (list file) nil force)
 		  (push (funcall conv-fn file) res)
 		  ;; export ex files
