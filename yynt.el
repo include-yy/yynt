@@ -32,6 +32,7 @@
 ;; 1. Consider add dired support for export and publish
 ;; 2. Improve documentation and comments
 ;; 3. Add a transient interface(MAYBE)
+;; 4. Make yynt-build's fn more generic(MAYBE)
 
 ;;; Code:
 
@@ -799,7 +800,7 @@ If the parameter FORCE is non-nil, the file will always be exported."
 			 (cdr props)))
 		(yynt--log "ok" t)))))))))
 
-(defun yynt-export-files (bobj files &optional ex force)
+(defun yynt--export-files (bobj files &optional ex force)
   "Export the list of files FILES located under BOBJ.
 Return list of generated-file.
 
@@ -821,7 +822,7 @@ combine info and info-ex."
 				fn info f g ex force))
 	     files out-files)))
 
-(defun yynt-export-external-files (project files)
+(defun yynt--export-external-files (project files)
   "Export the external file list FILES in PROJECT. Return the list
 of generated files."
   (let* ((full-files (mapcar (lambda (x) (yynt-get-file-project-fullname x project))
@@ -830,7 +831,7 @@ of generated files."
     (dolist (f full-files res)
       (if-let* ((obj (yynt-get-file-build-object f project))
 		(cov-fn (yynt-build--convert-fn obj)))
-	  (progn (yynt-export-files obj (list f) t t)
+	  (progn (yynt--export-files obj (list f) t t)
 		 (push (funcall cov-fn f) res))
 	(error "file %s not belongs to any build object" f)))))
 
@@ -845,19 +846,19 @@ If NOEXTERNAL is non-nil, BOBJ's ext-files will not be exported."
 		      (yynt--get-current-time)))
     (pcase type
       (0 (let ((files-1 (yynt-buildm-collect bobj)))
-	   (yynt-export-files bobj files-1 nil force)))
+	   (yynt--export-files bobj files-1 nil force)))
       ((or 1 2)
        (let* ((files-1 (yynt-buildm-collect bobj))
 	      (files-2 (yynt-buildm-collect-ex bobj)))
-	 (yynt-export-files bobj files-1 nil force)
-	 (yynt-export-files bobj files-2 t force)))
+	 (yynt--export-files bobj files-1 nil force)
+	 (yynt--export-files bobj files-2 t force)))
       (_ (error "not a valid build object type: %s" type)))
     (unless noexternal
-      (yynt-export-external-files
+      (yynt--export-external-files
        (yynt-build--project bobj)
        (yynt-build--ext-files bobj)))))
 
-(defun yynt-collect-external-files (bobjs)
+(defun yynt--collect-external-files (bobjs)
   "Retrieve all ext-files from the BOBJS list.
 
 BOBJS must belong to the same project."
@@ -876,11 +877,11 @@ BOBJS must belong to the same project."
 
 BOBJS must belong to the same project."
   (when bobjs
-    (let ((ext-files (yynt-collect-external-files bobjs))
+    (let ((ext-files (yynt--collect-external-files bobjs))
 	  (project (yynt-build--project (car bobjs))))
       (yynt-with-sqlite project
 	(dolist (b bobjs) (yynt-export-build-object b force t))
-	(yynt-export-external-files project ext-files)))))
+	(yynt--export-external-files project ext-files)))))
 
 (defun yynt-export-build (bname &optional force)
   "Export selected build object."
@@ -920,7 +921,7 @@ If invoked with C-u, force export."
 	  (yynt-with-sqlite project
 	    (if (eq 0 (yynt-build--type bobj))
 		(let ((files (yynt-buildm-collect bobj)))
-		  (yynt-export-files bobj files nil force)
+		  (yynt--export-files bobj files nil force)
 		  (push (yynt-buildm-convert bobj (car files)) res))
 	      (let* ((basename (yynt-get-file-build-basename file bobj))
 		     (get-fn (lambda (x) (yynt-get-file-build-basename x bobj))))
@@ -930,21 +931,21 @@ If invoked with C-u, force export."
 		  ;; FIXME: Consider exporting all files in the directory
 		  ;; where this file is located?
 		  ;; Maybe C-u C-u ...
-		  (yynt-export-files bobj (list file) nil force)
+		  (yynt--export-files bobj (list file) nil force)
 		  (push (funcall conv-fn file) res)
 		  ;; export ex files
 		  (let ((ex-files (yynt-buildm-collect-ex bobj)))
-		    (yynt-export-files bobj ex-files t force)
+		    (yynt--export-files bobj ex-files t force)
 		    (dolist (f ex-files) (push (funcall conv-fn f) res-ex))))
 		 ((cl-member basename (yynt-buildm-collect-ex bobj)
 			     :key get-fn :test #'string=)
-		  (yynt-export-files bobj (list file) t force)
+		  (yynt--export-files bobj (list file) t force)
 		  (push (funcall conv-fn file) res-ex))
 		 (t (user-error "file seems not a exportable file")))))
 	    ;; return (bobj res res-ex res-ext)
 	    ;; used by `yynt-publish-file'
 	    (cl-values bobj res res-ex
-		       (yynt-export-external-files
+		       (yynt--export-external-files
 			project (yynt-build--ext-files bobj)))))))))
 
 ;;; Impl of publisher.
@@ -1049,19 +1050,19 @@ and published."
 		   (yynt-publish-attach-cached project final force)))))))
       (unless noexternal
 	(let* ((ext-files (yynt-build--ext-files bobj))
-	       (outfiles (yynt-export-external-files project ext-files)))
+	       (outfiles (yynt--export-external-files project ext-files)))
 	  (yynt-publish-attach-cached project outfiles force))))))
 
 (defun yynt-publish-build-object-list (bobjs &optional force)
   "Export and Publish all files in BOBJS list"
   (let ((bobjs (cl-remove-if-not #'yynt--build-can-publish-p bobjs)))
     (when bobjs
-      (let* ((ext-files (yynt-collect-external-files bobjs))
+      (let* ((ext-files (yynt--collect-external-files bobjs))
 	     (project (yynt-build--project (car bobjs))))
 	(yynt-with-sqlite project
 	  (dolist (b bobjs)
 	    (yynt-publish-build-object b force t))
-	  (let* ((outfiles (yynt-export-external-files project ext-files)))
+	  (let* ((outfiles (yynt--export-external-files project ext-files)))
 	    (yynt-publish-attach-cached
 	     project outfiles force)))))))
 
