@@ -559,6 +559,12 @@ be published."
 			    included-resources)
 		  (mapcar (lambda (x) (expand-file-name x build-path))
 			  included-resources))))
+    ;; type-0's file is ex
+    (when (eq type 0)
+      (if collect-ex
+	  (setq collect-ex collect
+		collect #'ignore)
+	(setq collect-ex #'ignore)))
     (unless (cl-every #'file-exists-p i-res)
       (error "seems some resources not exist: %s" i-res))
     (let ((obj (yynt-build--make
@@ -845,8 +851,11 @@ If NOEXTERNAL is non-nil, BOBJ's ext-files will not be exported."
 		      (yynt-build--name bobj)
 		      (yynt--get-current-time)))
     (pcase type
-      (0 (let ((files-1 (yynt-buildm-collect bobj)))
-	   (yynt--export-files bobj files-1 nil force)))
+      (0 (if (eq (yynt-build--collect bobj) #'ignore)
+	     (let ((files (yynt-buildm-collect-ex bobj)))
+	       (yynt--export-files bobj files t force))
+	   (let ((files (yynt-buildm-collect bobj)))
+	     (yynt--export-files bobj files nil force))))
       ((or 1 2)
        (let* ((files-1 (yynt-buildm-collect bobj))
 	      (files-2 (yynt-buildm-collect-ex bobj)))
@@ -877,11 +886,40 @@ BOBJS must belong to the same project."
 
 BOBJS must belong to the same project."
   (when bobjs
-    (let ((ext-files (yynt--collect-external-files bobjs))
-	  (project (yynt-build--project (car bobjs))))
+    (let* ((ext-files (yynt--collect-external-files bobjs))
+	   (project (yynt-build--project (car bobjs)))
+	   (ext-builds (mapcar (lambda (x)
+				 (yynt-get-file-build-object
+				  (yynt-get-file-project-fullname x project)
+				  project))
+			       ext-files))
+	   (exts (cl-mapcar #'cons ext-files ext-builds))
+	   (necessary-ext-files (mapcar #'car (cl-remove-if
+					       (lambda (x) (member (cdr x) bobjs))
+					       exts))))
+      (yynt--log (format "#EXPORTING %s object in {%s} --- %s\n"
+			 (length bobjs)
+			 (yynt-project--name project)
+			 (yynt--get-current-time)))
       (yynt-with-sqlite project
-	(dolist (b bobjs) (yynt-export-build-object b force t))
-	(yynt--export-external-files project ext-files)))))
+	(dolist (b bobjs)
+	  (let ((files-1 (yynt-buildm-collect b)))
+	    (yynt--log (format "+EXPORTING {%s → %s} --- %s\n"
+			       (yynt-project--name project)
+			       (yynt-build--name b)
+			       (yynt--get-current-time)))
+	    (yynt--export-files b files-1 nil force)))
+	(yynt--log (format "+EXPORTING %s object's ex files --- %s\n"
+			   (length bobjs)
+			   (yynt--get-current-time)))
+	(dolist (b bobjs)
+	  (let ((files-2 (yynt-buildm-collect-ex b)))
+	    (yynt--export-files b files-2 t force)))
+	(if (null necessary-ext-files)
+	    (yynt--log "++NO EXTERNAL FILES")
+	  (yynt--log (format "++EXPORTING EXTERNAL FILES --- %s\n"
+			     (yynt--get-current-time)))
+	  (yynt--export-external-files project necessary-ext-files))))))
 
 (defun yynt-export-build (bname &optional force)
   "Export selected build object."
@@ -919,29 +957,25 @@ If invoked with C-u, force export."
 	       (conv-fn (yynt-build--convert-fn bobj))
 	       res res-ex)
 	  (yynt-with-sqlite project
-	    (if (eq 0 (yynt-build--type bobj))
-		(let ((files (yynt-buildm-collect bobj)))
-		  (yynt--export-files bobj files nil force)
-		  (push (yynt-buildm-convert bobj (car files)) res))
-	      (let* ((basename (yynt-get-file-build-basename file bobj))
-		     (get-fn (lambda (x) (yynt-get-file-build-basename x bobj))))
-		(cond
-		 ((cl-member basename (yynt-buildm-collect bobj)
-			     :key get-fn :test #'string=)
-		  ;; FIXME: Consider exporting all files in the directory
-		  ;; where this file is located?
-		  ;; Maybe C-u C-u ...
-		  (yynt--export-files bobj (list file) nil force)
-		  (push (funcall conv-fn file) res)
-		  ;; export ex files
-		  (let ((ex-files (yynt-buildm-collect-ex bobj)))
-		    (yynt--export-files bobj ex-files t force)
-		    (dolist (f ex-files) (push (funcall conv-fn f) res-ex))))
-		 ((cl-member basename (yynt-buildm-collect-ex bobj)
-			     :key get-fn :test #'string=)
-		  (yynt--export-files bobj (list file) t force)
-		  (push (funcall conv-fn file) res-ex))
-		 (t (user-error "file seems not a exportable file")))))
+	    (let* ((basename (yynt-get-file-build-basename file bobj))
+		   (get-fn (lambda (x) (yynt-get-file-build-basename x bobj))))
+	      (cond
+	       ((cl-member basename (yynt-buildm-collect bobj)
+			   :key get-fn :test #'string=)
+		;; FIXME: Consider exporting all files in the directory
+		;; where this file is located?
+		;; Maybe C-u C-u ...
+		(yynt--export-files bobj (list file) nil force)
+		(push (funcall conv-fn file) res)
+		;; export ex files
+		(let ((ex-files (yynt-buildm-collect-ex bobj)))
+		  (yynt--export-files bobj ex-files t force)
+		  (dolist (f ex-files) (push (funcall conv-fn f) res-ex))))
+	       ((cl-member basename (yynt-buildm-collect-ex bobj)
+			   :key get-fn :test #'string=)
+		(yynt--export-files bobj (list file) t force)
+		(push (funcall conv-fn file) res-ex))
+	       (t (user-error "file seems not a exportable file"))))
 	    ;; return (bobj res res-ex res-ext)
 	    ;; used by `yynt-publish-file'
 	    (cl-values bobj res res-ex
