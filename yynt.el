@@ -395,6 +395,27 @@ For the argument VALUES and RETURN-TYPE, see `sqlite-select' docstring."
       (sqlite-select yynt--sqlite-obj query values return-type)
     (yynt-with-sqlite project
       (sqlite-select yynt--sqlite-obj query values return-type))))
+
+(defun yynt-delete-missing-cache (project)
+  "Delete the rows in the PROJECT cache where the files do not exist."
+  (interactive (list yynt-current-project))
+  (if (not (yynt-project-p project))
+      (user-error "not a project object")
+    (if (not (yynt--project-has-cache-p project))
+	(user-error "project doesn't have cache file")
+      (yynt-with-sqlite project
+	(let ((files (car (sqlite-select yynt--sqlite-obj
+					 "SELECT path FROM yynt")))
+	      nofiles)
+	  (dolist (f files)
+	    (let ((full (yynt-get-file-project-fullname f project)))
+	      (unless (file-exists-p full)
+		(push full nofiles))))
+	  (dolist (n nofiles)
+	    (yynt--delete-cache project n))
+	  (message "delete %s rows" (length nofiles))
+	  (length nofiles))))))
+
 
 ;;; Definition of yynt-build and some helper functions.
 
