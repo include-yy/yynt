@@ -544,7 +544,7 @@ be published."
 	 (build-path (if (not (file-directory-p full-path)) full-path
 		       (file-name-as-directory full-path)))
 	 (name (if (not (file-directory-p build-path)) path
-		   (directory-file-name path)))
+		 (directory-file-name path)))
 	 (ht (let ((ht (make-hash-table :test #'equal)))
 	       (if (eq type 0) ; type 0 just check itself
 		   (if (null no-cache-files) ht
@@ -992,8 +992,8 @@ See `org-publish-attachment'"
   (unless (file-directory-p pub-dir)
     (make-directory pub-dir t))
   (let ((output (expand-file-name (file-name-nondirectory file) pub-dir)))
-      (copy-file file output t)
-      output))
+    (copy-file file output t)
+    output))
 
 (defun yynt--publish-attach-file-cached (project file &optional force)
   "Publish FILE to PROJECT pubdir, write log messages,
@@ -1011,16 +1011,16 @@ If FORCE is non-nil, FILE will always be published."
 	  (progn (yynt--publish-attachment file pub-dir)
 		 (yynt--log (format "(%s) %s published" pname file) t))
 	(let ((ptime (or (car (yynt--select-cache project file
-						   '("publish_time")))
+						  '("publish_time")))
 			 "2000-01-01 00:00"))
 	      (ctime (yynt--get-file-ctime file)))
 	  (if (and (not force) (yynt--time-less-p ctime ptime))
 	      (yynt--log (format "(%s) %s skipped"
-				pname rela-file)
+				 pname rela-file)
 			 t)
 	    (yynt--publish-attachment file pub-dir)
 	    (yynt--upsert-cache project file '("publish_time")
-				 (list (yynt--get-current-time)))
+				(list (yynt--get-current-time)))
 	    (yynt--log (format "(%s) %s published" pname rela-file) t)))))))
 
 (defun yynt--publish-attach-dir-cached (project dir &optional force)
@@ -1097,7 +1097,7 @@ If FORCE is non-nil, FILE will always be published."
 		      "Select a project:>"
 		      (cons "*t*"
 			    (mapcar #'yynt-build--name
-			     (yynt-project--builds yynt-current-project)))
+				    (yynt-project--builds yynt-current-project)))
 		      nil t)
 		     current-prefix-arg))
   (let ((start-time (float-time)))
@@ -1158,11 +1158,11 @@ If invoked with C-u, force publish."
 	       (yynt-publish-attach-cached
 		proj (append export-files resource) force))
 	      (2 (let ((res-2 (and res (yynt--get-publish-file-2 file bobj))))
-		 (if (not res-2)
+		   (if (not res-2)
+		       (yynt-publish-attach-cached
+			proj (append export-files resource) force)
 		     (yynt-publish-attach-cached
-		      proj (append export-files resource) force)
-		   (yynt-publish-attach-cached
-		    proj (append res-2 res-ex res-ext resource) force))))
+		      proj (append res-2 res-ex res-ext resource) force))))
 	      (_ (error "never happends"))))
 	  (message (format "publish file in [%s] fin in %ss"
 			   (yynt-build--name bobj)
