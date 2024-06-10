@@ -673,7 +673,9 @@ end of the MESSAGE."
     (with-current-buffer (yynt--create-log-buffer)
       (let ((inhibit-read-only t))
 	(goto-char (point-max))
-	(insert (concat message (and newline "\n")))))))
+	(insert (concat message (and newline "\n"))))))
+  nil)
+
 (defun yynt-logger ()
   "Show logger buffer."
   (interactive)
@@ -836,7 +838,7 @@ of generated files."
       (if-let* ((obj (yynt-get-file-build-object f project))
 		(cov-fn (yynt-build--convert-fn obj)))
 	  (progn (yynt--export-files obj (list f) t t)
-		 (push (funcall cov-fn f) res))
+		 (push (cons (funcall cov-fn f) obj) res))
 	(error "file %s not belongs to any build object" f)))))
 
 (defun yynt--collect-external-files (bobjs)
@@ -869,27 +871,27 @@ BOBJS must belong to the same project."
 	   (necessary-ext-files (mapcar #'car (cl-remove-if
 					       (lambda (x) (member (cdr x) bobjs))
 					       exts))))
-      (yynt--log (format "#EXPORTING %s object in {%s} --- %s\n"
+      (yynt--log (format "<<<EXPORTING %s object in {%s} --- %s\n"
 			 (length bobjs)
 			 (yynt-project--name project)
 			 (yynt--get-current-time)))
       (yynt-with-sqlite project
 	(dolist (b bobjs)
 	  (let ((files-1 (yynt-buildm-collect b)))
-	    (yynt--log (format "+EXPORTING {%s → %s} --- %s\n"
+	    (yynt--log (format "<EXPORTING {%s → %s} --- %s\n"
 			       (yynt-project--name project)
 			       (yynt-build--name b)
 			       (yynt--get-current-time)))
 	    (yynt--export-files b files-1 nil force)))
-	(yynt--log (format "+EXPORTING %s object's ex files --- %s\n"
+	(yynt--log (format "<EXPORTING %s object's ex files --- %s\n"
 			   (length bobjs)
 			   (yynt--get-current-time)))
 	(dolist (b bobjs)
 	  (let ((files-2 (yynt-buildm-collect-ex b)))
 	    (yynt--export-files b files-2 t force)))
 	(if (null necessary-ext-files)
-	    (yynt--log "++NO EXTERNAL FILES")
-	  (yynt--log (format "++EXPORTING EXTERNAL FILES --- %s\n"
+	    (yynt--log "<<NO EXTERNAL FILES\n")
+	  (yynt--log (format "<<EXPORTING EXTERNAL FILES --- %s\n"
 			     (yynt--get-current-time)))
 	  (yynt--export-external-files project necessary-ext-files))))))
 
@@ -925,7 +927,7 @@ invoked with C-u, force export."
     (let* ((bobj (yynt-get-file-build-object file)))
       (if (null bobj)
 	  (user-error "file %s seems not belong to any build object" file)
-	(yynt--log "#EXPORTING %s in {%s} --- %s"
+	(yynt--log "<EXPORTING %s in {%s} --- %s"
 		   (yynt-get-file-project-basename file)
 		   (yynt-buildm-project-name bobj)
 		   (yynt--get-current-time))
@@ -953,8 +955,9 @@ invoked with C-u, force export."
 	    ;; return (bobj res res-ex res-ext)
 	    ;; used by `yynt-publish-file'
 	    (cl-values bobj res res-ex
-		       (yynt--export-external-files
-			project (yynt-build--ext-files bobj)))))))))
+		       (mapcar #'car
+			       (yynt--export-external-files
+				project (yynt-build--ext-files bobj))))))))))
 
 ;;; Impl of publisher.
 
@@ -1018,60 +1021,56 @@ If FORCE is non-nil, FILE will always be published."
   "Retrieve the list of directories and files excluding \".\" and \"..\"."
   (directory-files dir full directory-files-no-dot-files-regexp))
 
-(defun yynt-publish-build-object (bobj &optional force noexternal)
-  "Export and Publish all files in BOBJ.
-
-If NOEXTERNAL is non-nil, BOBJ ext-files will not be exported and
-published."
-  (yynt-export-build-object-list (list bobj) force noexternal)
-  (yynt--log (format "@PUBLISHING {%s → %s} --- %s\n"
-		    (yynt-buildm-project-name bobj)
-		    (yynt-build--name bobj)
-		    (yynt--get-current-time)))
-  (when (yynt--build-can-publish-p bobj)
-    (let ((type (yynt-build--type bobj))
-	  (co-fn (yynt-build--convert-fn bobj))
-	  (project (yynt-build--project bobj)))
-      (pcase type
-	(0 (yynt-publish-attach-cached
-	    project
-	    (cons (funcall co-fn (yynt-build--path bobj))
-		  (yynt-build--included-resources bobj))))
-	(1 (let* ((files (append (yynt-buildm-collect bobj)
-				 (yynt-buildm-collect-ex bobj)))
-		  (outfiles (mapcar co-fn files))
-		  (final (append outfiles
-				 (yynt-build--included-resources bobj))))
-	     (yynt-publish-attach-cached project final force)))
-	(2 (let* ((files (yynt-buildm-collect-ex bobj))
-		  (outfiles (mapcar co-fn files)))
-	     (yynt-publish-attach-cached project outfiles force)
-	     (let* ((dirs (yynt-buildm-collect-2 bobj))
-		    (excl-fn (yynt-build--excluded-fn-2 bobj)))
-	       (dolist (d dirs)
-		 (let* ((pred (funcall excl-fn bobj d))
-			(full-dir (yynt-get-file-build-fullname d bobj))
-			(files (yynt--directory-files full-dir))
-			(final (mapcar (lambda (x) (file-name-concat full-dir x))
-				       (cl-remove-if pred files))))
-		   (yynt-publish-attach-cached project final force)))))))
-      (unless noexternal
-	(let* ((ext-files (yynt-build--ext-files bobj))
-	       (outfiles (yynt--export-external-files project ext-files)))
-	  (yynt-publish-attach-cached project outfiles force))))))
-
 (defun yynt-publish-build-object-list (bobjs &optional force)
   "Export and Publish all files in BOBJS list"
-  (let ((bobjs (cl-remove-if-not #'yynt--build-can-publish-p bobjs)))
-    (when bobjs
-      (let* ((ext-files (yynt--collect-external-files bobjs))
-	     (project (yynt-build--project (car bobjs))))
+  (let* ((externals (yynt-export-build-object-list bobjs force))
+	 (pub-bobjs (cl-remove-if-not #'yynt--build-can-publish-p bobjs)))
+    (if (null pub-bobjs)
+	(yynt--log (format ">>>PUBLISH zero build object --- %s\n"
+			   (yynt--get-current-time)))
+      (yynt--log (format ">>>PUBLISH %s build objects in {%s} --- %s\n"
+			 (length pub-bobjs)
+			 (yynt-buildm-project-name (car pub-bobjs))
+			 (yynt--get-current-time)))
+      (let ((project (yynt-build--project (car pub-bobjs))))
 	(yynt-with-sqlite project
-	  (dolist (b bobjs)
-	    (yynt-publish-build-object b force t))
-	  (let* ((outfiles (yynt--export-external-files project ext-files)))
-	    (yynt-publish-attach-cached
-	     project outfiles force)))))))
+	  (dolist (p pub-bobjs)
+	    (yynt--log (format ">PUBLISH {%s → %s} --- %s\n"
+			       (yynt-buildm-project-name p)
+			       (yynt-build--name p)
+			       (yynt--get-current-time)))
+	    (let* ((convert-fn (yynt-build--convert-fn p))
+		   (type (yynt-build--type p)))
+	      (pcase type
+		((or 0 1)
+		 (let* ((files (mapcar convert-fn
+				       (append (yynt-buildm-collect p)
+					       (yynt-buildm-collect-ex p))))
+			(res (yynt-build--included-resources p)))
+		   (yynt-publish-attach-cached
+		    project (append files res) force)))
+		(2 (let* ((dirs (yynt-buildm-collect-2 p))
+			  (excl-fn (yynt-build--excluded-fn-2 p)))
+		     (dolist (d dirs)
+		       (let* ((pred (funcall excl-fn p d))
+			      (full-dir (yynt-get-file-build-fullname d p))
+			      (files (yynt--directory-files full-dir))
+			      (final (mapcar
+				      (lambda (x) (file-name-concat full-dir x))
+				      (cl-remove-if pred files))))
+			 (yynt-publish-attach-cached project final force)))
+		     (let ((files (mapcar convert-fn
+					  (yynt-buildm-collect-ex p))))
+		       (yynt-publish-attach-cached project files force)))))))
+	  (let ((pub-exts (cl-remove-if-not
+			   #'yynt-build--published
+			   externals :key #'cdr)))
+	    (if (null pub-exts)
+		(yynt--log ">>NO EXTERNAL FILES\n")
+	      (yynt--log (format ">>PUBLISH EXTERNAL FILES --- %s\n"
+				 (yynt--get-current-time)))
+	      (let ((files (mapcar #'car pub-exts)))
+		(yynt-publish-attach-cached project files force)))))))))
 
 (defun yynt-publish-build (bname &optional force)
   "Interactively choose and publish a BOBJ."
@@ -1097,7 +1096,7 @@ published."
 	    (message "seems not a publish-able bobj: [%s]"
 		     (yynt-build--name bobj))
 	  (yynt-with-sqlite (yynt-build--project bobj)
-	    (yynt-publish-build-object bobj force))
+	    (yynt-publish-build-object-list (list bobj) force))
 	  (message "publish project [%s] in %ss"
 		   (yynt-build--name bobj)
 		   (- (float-time) start-time)))))))
@@ -1130,20 +1129,21 @@ If invoked with C-u, force publish."
 	    (export-files (append res res-ex res-ext)))
 	(if (not (yynt--build-can-publish-p bobj))
 	    (message "seems file not in a publish-able build object")
-	  (yynt--log (format "*PUBLISHING %s --- %s\n"
-			    (yynt-get-file-project-basename file proj)
-			    (yynt--get-current-time)))
+	  (yynt--log (format ">PUBLISHING %s in %s--- %s\n"
+			     (yynt-get-file-project-basename file proj)
+			     (yynt-project--name proj)
+			     (yynt--get-current-time)))
 	  (yynt-with-sqlite proj
 	    (pcase (yynt-build--type bobj)
 	      ((or 0 1)
 	       (yynt-publish-attach-cached
-		proj (append resource export-files) force))
+		proj (append export-files resource) force))
 	      (2 (let ((res-2 (and res (yynt--get-publish-file-2 file bobj))))
 		 (if (not res-2)
 		     (yynt-publish-attach-cached
-		      proj (append resource export-files) force)
+		      proj (append export-files resource) force)
 		   (yynt-publish-attach-cached
-		    proj (append res-2 res-ex res-ext) force))))
+		    proj (append res-2 res-ex res-ext resource) force))))
 	      (_ (error "never happends"))))
 	  (message (format "publish file in [%s] fin in %ss"
 			   (yynt-build--name bobj)
