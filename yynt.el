@@ -960,6 +960,24 @@ invoked with C-u, force export."
 		       (mapcar #'car
 			       (yynt--export-external-files
 				project (yynt-build--ext-files bobj))))))))))
+
+(defun yynt-export-current-buffer (buffer &optional project)
+  "Accept a buffer as a parameter and export that buffer."
+  (or project (setq project yynt-current-project))
+  (let ((file (buffer-file-name))
+	(bobj (yynt-get-file-build-object file project)))
+    (unless file
+      (user-error "buffer seems not has a file"))
+    (unless (yynt-build-p bobj)
+      (user-error "file may not belong to any yynt's any build object"))
+    (yynt-with-sqlite project
+      (cond
+       ((member file (yynt-buildm-collect bobj))
+	(yynt--export-files bobj (list file) nil t))
+       ((member file (yynt-buildm-collect-ex bobj))
+	(yynt--export-files bobj (list file) t t))
+       (t (user-error "file may not belong to any yynt's any build object"))))
+    (yynt-buildm-convert bobj file)))
 
 ;;; Impl of publisher.
 
