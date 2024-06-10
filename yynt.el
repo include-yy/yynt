@@ -334,8 +334,7 @@ same name."
   "Update or insert a row: update if the file already exists, otherwise insert.
 
 Ensure that `yynt--sqlite-obj' belongs to the PROJECT."
-  (let* ((items (yynt-project--cache-items project))
-	 (base (yynt-get-file-project-basename file project))
+  (let* ((base (yynt-get-file-project-basename file project))
 	 (k-fields (mapconcat #'identity (cons "path" keys) ","))
 	 (v-fields (mapconcat (lambda (x) (format "'%s'" x))
 			      (cons base values) ","))
@@ -928,14 +927,14 @@ invoked with C-u, force export."
     (let* ((bobj (yynt-get-file-build-object file)))
       (if (null bobj)
 	  (user-error "file %s seems not belong to any build object" file)
-	(yynt--log "<<<EXPORTING %s in {%s → %s} --- %s"
-		   (yynt-get-file-project-basename file)
-		   (yynt-buildm-project-name bobj)
-		   (yynt-build--name bobj)
-		   (yynt--get-current-time))
 	(let* ((project (yynt-build--project bobj))
 	       (conv-fn (yynt-build--convert-fn bobj))
 	       res res-ex)
+	  (yynt--log (format "<<<EXPORTING %s in {%s → %s} --- %s\n"
+			     (yynt-get-file-project-basename file project)
+			     (yynt-buildm-project-name bobj)
+			     (yynt-build--name bobj)
+			     (yynt--get-current-time)))
 	  (yynt-with-sqlite project
 	    (let* ((basename (yynt-get-file-build-basename file bobj))
 		   (get-fn (lambda (x) (yynt-get-file-build-basename x bobj))))
@@ -964,8 +963,8 @@ invoked with C-u, force export."
 (defun yynt-export-current-buffer (buffer &optional project)
   "Accept a buffer as a parameter and export that buffer."
   (or project (setq project yynt-current-project))
-  (let ((file (buffer-file-name))
-	(bobj (yynt-get-file-build-object file project)))
+  (let* ((file (buffer-file-name buffer))
+	 (bobj (yynt-get-file-build-object file project)))
     (unless file
       (user-error "buffer seems not has a file"))
     (unless (yynt-build-p bobj)
@@ -1149,7 +1148,7 @@ If invoked with C-u, force publish."
 	    (export-files (append res res-ex res-ext)))
 	(if (not (yynt--build-can-publish-p bobj))
 	    (message "seems file not in a publish-able build object")
-	  (yynt--log (format ">PUBLISHING %s in %s--- %s\n"
+	  (yynt--log (format ">>>PUBLISHING %s in %s--- %s\n"
 			     (yynt-get-file-project-basename file proj)
 			     (yynt-project--name proj)
 			     (yynt--get-current-time)))
