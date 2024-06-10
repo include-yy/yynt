@@ -29,10 +29,11 @@
 ;;; Commentary:
 
 ;; TODO:
-;; 1. Consider add dired support for export and publish
-;; 2. Improve documentation and comments
-;; 3. Add a transient interface(MAYBE)
-;; 4. Make yynt-build's fn more generic(MAYBE)
+;; - Better error signal
+;; - Consider make yynt-build's fn more generic(MAYBE)
+;; - Consider add dired support for export and publish
+;; - Consider add a transient interface
+;; - Improve documentation and comments
 
 ;;; Code:
 
