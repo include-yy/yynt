@@ -68,8 +68,8 @@ Set it using `yynt-choose-project'.")
   '("file_name" "build_name" "ex" "export_time" "publish_time")
   "Inherent fields in the cache database.
 
-All tables use the relative \"PATH\" of the file, relative to the PROJECT
-directory, as the primary key.
+All tables use the relative \"PATH\" of the file, relative to the
+PROJECT directory, as the primary key.
 
 FILE_NAME is the name of the file, without any directory prefixes.
 
@@ -143,8 +143,9 @@ be present in the database for the creation of the cache database.
 
 Items in CACHE-ITEMS must satisfy the `yynt--cache-item-p' predicate,
 which means they must start with a letter and match the regular
-expression \"[0-9A-Za-z_]\". Additionally, they cannot contain items with
-the same names as those in `yynt-project-fixed-fields' (plus \"path\").
+expression \"[0-9A-Za-z_]\". Additionally, they cannot contain items
+with the same names as those in `yynt-project-fixed-fields' (plus
+\"path\").
 
 DIRECTORY is the root directory of the project. If DIRECTORY is not
 provided, it will use `default-directory' as the default value."
@@ -282,8 +283,8 @@ macro is equivalent to progn."
 (defun yynt--initialize-cache (project)
   "Initialize the cache database, creating table YYNT if not exist.
 
-If the table YYNT already exists, this function will check if the
-fields in the project's cache-items match exactly with the fields in the
+If the table YYNT already exists, this function will check if the fields
+in the project's cache-items match exactly with the fields in the
 table. If they do not match, the table YYNT will be recreated.
 
 The data with the same names from the old table will be copied to the
@@ -462,16 +463,16 @@ details, refer to the EXT-PLIST docstring in `org-export-as'.
 
 COLLECT-EX accepts a build object as a parameter and returns additional
 files that need to be exported. Type 0 projects do not require this
-parameter.
+parameter. For a type-0 build object, if is t, then the file type is EX
+and COLLECT-EX will return list of this file.
 
 INFO-EX provides export information for the files obtained from
-COLLECT-EX. It will layer over INFO and may override some of
-INFO's information.
+COLLECT-EX. It will layer over INFO and may override some of INFO's
+information.
 
 FN is the export function that will export the current buffer. It
-accepts INFO plist and OUTFILE path as parameters. If the
-function does not signal an error, the export is considered
-successful.
+accepts INFO plist and OUTFILE path as parameters. If the function does
+not signal an error, the export is considered successful.
 
 ATTRS is a list of keywords used to obtain metadata from the files to be
 exported. They must belong to the project's cache-items and cannot
@@ -481,8 +482,8 @@ NO-CACHE-FILES specifies files that do not need to be cached. They are
 paths relative to the build object path. For type 0 projects, set to nil
 to indicate none exist, or t to cache the single file.
 
-EXT-FILES specifies a list of files that depend on the build
-object's content. They are paths relative to the project object's
+EXT-FILES specifies a list of files that depend on the build object's
+content. They are paths relative to the project object's
 directory. EXT-FILES must be files from function COLLECT-EX.
 
 CONVERT-FN converts the name of the file to be exported into the name of
@@ -636,8 +637,8 @@ published attribute does not take effect and it will never be published."
 (defun yynt-get-file-build-object (file &optional project)
   "Get the corresponding build object based on FILE.
 
-If the PROJECT parameter is not provided, `yynt-current-project'
-will be used as the project for lookup."
+If the PROJECT parameter is not provided, `yynt-current-project' will be
+used as the project for lookup."
   (when-let ((project (or project yynt-current-project)))
     (cl-find-if (lambda (b) (yynt--in-build-p b file))
 		(yynt-project--builds project))))
@@ -683,9 +684,8 @@ end of the MESSAGE."
 (defun yynt-combine-plists (&rest plists)
   "Create a single property list from all plists in PLISTS.
 The process starts by copying the first list, and then setting
-properties from the other lists. Settings in the last list are
-the most significant ones and overrule settings in the other
-lists.
+properties from the other lists. Settings in the last list are the most
+significant ones and overrule settings in the other lists.
 
 Copied from `org-combine-plists'"
   (let ((rtn (copy-sequence (pop plists)))
@@ -761,11 +761,11 @@ YYYY-MM-DD hh:mm:ss."
 
 (defun yynt--export-current-buffer (fn plist in out)
   "Call the export function. If the function does not signal an
-error, the export is considered successful and returns t;
-otherwise, it returns nil.
+error, the export is considered successful and returns t; otherwise, it
+returns nil.
 
-If debug-on-error is enabled through toggle-debug-on-error,
-errors will not be caught."
+If debug-on-error is enabled through toggle-debug-on-error, errors will
+not be caught."
   (condition-case-unless-debug nil
       (prog1 t (funcall fn plist in out))
     (error nil)))
@@ -810,8 +810,8 @@ If the parameter FORCE is non-nil, the file will always be exported."
   "Export the list of files FILES located under BOBJ.
 Return list of generated-file.
 
-If the EX parameter is non-nil, the plist used for export will
-combine info and info-ex."
+If the EX parameter is non-nil, the plist used for export will combine
+info and info-ex."
   (let* ((project (yynt-build--project bobj))
 	 (pname (yynt-project--name project))
 	 (bname (yynt-build--name bobj))
@@ -840,32 +840,6 @@ of generated files."
 	  (progn (yynt--export-files obj (list f) t t)
 		 (push (funcall cov-fn f) res))
 	(error "file %s not belongs to any build object" f)))))
-
-(defun yynt-export-build-object (bobj &optional force noexternal)
-  "Export all files in BOBJ.
-
-If NOEXTERNAL is non-nil, BOBJ's ext-files will not be exported."
-  (let ((type (yynt-build--type bobj)))
-    (yynt--log (format "+EXPORTING {%s → %s} --- %s\n"
-		      (yynt-buildm-project-name bobj)
-		      (yynt-build--name bobj)
-		      (yynt--get-current-time)))
-    (pcase type
-      (0 (if (eq (yynt-build--collect bobj) #'ignore)
-	     (let ((files (yynt-buildm-collect-ex bobj)))
-	       (yynt--export-files bobj files t force))
-	   (let ((files (yynt-buildm-collect bobj)))
-	     (yynt--export-files bobj files nil force))))
-      ((or 1 2)
-       (let* ((files-1 (yynt-buildm-collect bobj))
-	      (files-2 (yynt-buildm-collect-ex bobj)))
-	 (yynt--export-files bobj files-1 nil force)
-	 (yynt--export-files bobj files-2 t force)))
-      (_ (error "not a valid build object type: %s" type)))
-    (unless noexternal
-      (yynt--export-external-files
-       (yynt-build--project bobj)
-       (yynt-build--ext-files bobj)))))
 
 (defun yynt--collect-external-files (bobjs)
   "Retrieve all ext-files from the BOBJS list.
@@ -939,14 +913,14 @@ BOBJS must belong to the same project."
 			bname (yynt-project--builds yynt-current-project)
 			:test #'string= :key #'yynt-build--name))))
 	(yynt-with-sqlite yynt-current-project
-	  (yynt-export-build-object bobj force))))
+	  (yynt-export-build-object-list (list bobj) force))))
     (message "export [%s] in %ss" bname (- (float-time) start-time))))
 
 (defun yynt-export-file (file &optional force)
   "Export current buffer.
 
-If called interactively, use current's `buffer-file-name' as FILE.
-If invoked with C-u, force export."
+If called interactively, use current's `buffer-file-name' as FILE.  If
+invoked with C-u, force export."
   (interactive (list (buffer-file-name) current-prefix-arg))
   (if (null file)
       (user-error "buffer seems not have `buffer-file-name'")
@@ -1048,9 +1022,9 @@ If FORCE is non-nil, FILE will always be published."
 (defun yynt-publish-build-object (bobj &optional force noexternal)
   "Export and Publish all files in BOBJ.
 
-If NOEXTERNAL is non-nil, BOBJ ext-files will not be exported
-and published."
-  (yynt-export-build-object bobj force noexternal)
+If NOEXTERNAL is non-nil, BOBJ ext-files will not be exported and
+published."
+  (yynt-export-build-object-list (list bobj) force noexternal)
   (yynt--log (format "@PUBLISHING {%s → %s} --- %s\n"
 		    (yynt-buildm-project-name bobj)
 		    (yynt-build--name bobj)
@@ -1208,3 +1182,8 @@ If invoked with C-u, force publish."
 
 (provide 'yynt)
 ;;; yynt.el ends here
+
+;; Local Variables:
+;; emacs-lisp-docstring-fill-column: 72
+;; fill-column: 80
+;; End:
