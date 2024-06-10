@@ -414,7 +414,7 @@ For the argument VALUES and RETURN-TYPE, see `sqlite-select' docstring."
 ;; fields.
 
 ;; Please read the docstrings of the yynt-build structure and the
-;; yynt-create-build function to understand their usage in detail.
+;; `yynt-create-build' function to understand their usage in detail.
 
 (cl-defstruct (yynt-build (:conc-name yynt-build--)
 			  (:constructor yynt-build--make)
@@ -550,9 +550,6 @@ be published."
 		   (if (null no-cache-files) ht
 		     (prog1 ht (puthash path t ht)))
 		 (dolist (x no-cache-files ht) (puthash x t ht)))))
-	 ;; generate a collect function for type-0
-	 (collect (if (not (and (eq type 0) (null collect))) collect
-		    (let ((x `(,build-path))) (lambda (_bobj) x))))
 	 ;; translate include-resources to full path
 	 ;; note for type-0 build object, we use project's dir as base dir
 	 (i-res (if (eq type 0)
@@ -560,12 +557,13 @@ be published."
 			    included-resources)
 		  (mapcar (lambda (x) (expand-file-name x build-path))
 			  included-resources))))
-    ;; type-0's file is ex
     (when (eq type 0)
-      (if collect-ex
-	  (setq collect-ex collect
-		collect #'ignore)
-	(setq collect-ex #'ignore)))
+      (let ((co-func (let ((x `(,build-path))) (lambda (_bobj) x))))
+	(if (null collect-ex)
+	    (setq collect co-func
+		  collect-ex #'ignore)
+	  (setq collect-ex co-func
+		collect #'ignore))))
     (unless (cl-every #'file-exists-p i-res)
       (error "seems some resources not exist: %s" i-res))
     (let ((obj (yynt-build--make
@@ -684,8 +682,8 @@ end of the MESSAGE."
 (defun yynt-combine-plists (&rest plists)
   "Create a single property list from all plists in PLISTS.
 The process starts by copying the first list, and then setting
-properties from the other lists. Settings in the last list are the most
-significant ones and overrule settings in the other lists.
+properties from the other lists. Settings in the last list are
+the most significant ones and overrule settings in the other lists.
 
 Copied from `org-combine-plists'"
   (let ((rtn (copy-sequence (pop plists)))
@@ -919,14 +917,14 @@ BOBJS must belong to the same project."
 (defun yynt-export-file (file &optional force)
   "Export current buffer.
 
-If called interactively, use current's `buffer-file-name' as FILE.  If
+If called interactively, use current's `buffer-file-name' as FILE. If
 invoked with C-u, force export."
   (interactive (list (buffer-file-name) current-prefix-arg))
   (if (null file)
       (user-error "buffer seems not have `buffer-file-name'")
     (let* ((bobj (yynt-get-file-build-object file)))
       (if (null bobj)
-	  (user-error "file %s seems not belong to current project's build object" file)
+	  (user-error "file %s seems not belong to any build object" file)
 	(let* ((project (yynt-build--project bobj))
 	       (conv-fn (yynt-build--convert-fn bobj))
 	       res res-ex)
@@ -936,9 +934,6 @@ invoked with C-u, force export."
 	      (cond
 	       ((cl-member basename (yynt-buildm-collect bobj)
 			   :key get-fn :test #'string=)
-		;; FIXME: Consider exporting all files in the directory
-		;; where this file is located?
-		;; Maybe C-u C-u ...
 		(yynt--export-files bobj (list file) nil force)
 		(push (funcall conv-fn file) res)
 		;; export ex files
@@ -978,7 +973,6 @@ See `org-publish-attachment'"
 and update the cache if necessary.
 
 If FORCE is non-nil, FILE will always be published."
-  ;; TODO: consider make validation simpler
   (when (and (file-exists-p file)
 	     (yynt--in-project-p file project))
     (let* ((pname (yynt-project--name project))
