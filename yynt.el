@@ -925,6 +925,10 @@ invoked with C-u, force export."
     (let* ((bobj (yynt-get-file-build-object file)))
       (if (null bobj)
 	  (user-error "file %s seems not belong to any build object" file)
+	(yynt--log "#EXPORTING %s in {%s} --- %s"
+		   (yynt-get-file-project-basename file)
+		   (yynt-buildm-project-name bobj)
+		   (yynt--get-current-time))
 	(let* ((project (yynt-build--project bobj))
 	       (conv-fn (yynt-build--convert-fn bobj))
 	       res res-ex)
@@ -936,10 +940,11 @@ invoked with C-u, force export."
 			   :key get-fn :test #'string=)
 		(yynt--export-files bobj (list file) nil force)
 		(push (funcall conv-fn file) res)
-		;; export ex files
+		;; export rest ex files
 		(let ((ex-files (yynt-buildm-collect-ex bobj)))
 		  (yynt--export-files bobj ex-files t force)
 		  (dolist (f ex-files) (push (funcall conv-fn f) res-ex))))
+	       ;; file belongs to ex fileset
 	       ((cl-member basename (yynt-buildm-collect-ex bobj)
 			   :key get-fn :test #'string=)
 		(yynt--export-files bobj (list file) t force)
@@ -958,7 +963,7 @@ invoked with C-u, force export."
 
 ;; Publishing will also use caching to eliminate unnecessary file copying.
 
-(defun yynt-publish-attachment (file pub-dir)
+(defun yynt--publish-attachment (file pub-dir)
   "Copy the file FILE to the publish directory PUB-DIR.
 
 See `org-publish-attachment'"
@@ -968,7 +973,7 @@ See `org-publish-attachment'"
       (copy-file file output t)
       output))
 
-(defun yynt-publish-attach-file-cached (project file &optional force)
+(defun yynt--publish-attach-file-cached (project file &optional force)
   "Publish FILE to PROJECT pubdir, write log messages,
 and update the cache if necessary.
 
@@ -981,7 +986,7 @@ If FORCE is non-nil, FILE will always be published."
 	   (pub-dir (file-name-concat (yynt-project--pubdir project)
 				      rela-dir)))
       (if (not (yynt--project-has-cache-p project))
-	  (progn (yynt-publish-attachment file pub-dir)
+	  (progn (yynt--publish-attachment file pub-dir)
 		 (yynt--log (format "(%s) %s published" pname file) t))
 	(let ((ptime (or (car (yynt--select-cache project file
 						   '("publish_time")))
@@ -990,26 +995,26 @@ If FORCE is non-nil, FILE will always be published."
 	  (if (and (not force) (yynt--time-less-p ctime ptime))
 	      (yynt--log (format "(%s) %s skipped"
 				pname rela-file)
-			t)
-	    (yynt-publish-attachment file pub-dir)
+			 t)
+	    (yynt--publish-attachment file pub-dir)
 	    (yynt--upsert-cache project file '("publish_time")
 				 (list (yynt--get-current-time)))
 	    (yynt--log (format "(%s) %s published" pname rela-file) t)))))))
 
-(defun yynt-publish-attach-dir-cached (project dir &optional force)
+(defun yynt--publish-attach-dir-cached (project dir &optional force)
   "Publish DIR recursively to PROJECT pubdir."
   (when (file-exists-p dir)
     (dolist (x (directory-files-recursively dir ".*"))
-      (yynt-publish-attach-file-cached project x force))))
+      (yynt--publish-attach-file-cached project x force))))
 
 (defun yynt-publish-attach-cached (project file-or-dir-ls &optional force)
   "Publish items in FILE-OR-DIR-LS to PROJECT pubdir."
   (dolist (x file-or-dir-ls)
     (if (file-directory-p x)
-	(yynt-publish-attach-dir-cached project x force)
-      (yynt-publish-attach-file-cached project x force))))
+	(yynt--publish-attach-dir-cached project x force)
+      (yynt--publish-attach-file-cached project x force))))
 
-(defun yynt-directory-files (dir &optional full)
+(defun yynt--directory-files (dir &optional full)
   "Retrieve the list of directories and files excluding \".\" and \"..\"."
   (directory-files dir full directory-files-no-dot-files-regexp))
 
@@ -1046,7 +1051,7 @@ published."
 	       (dolist (d dirs)
 		 (let* ((pred (funcall excl-fn bobj d))
 			(full-dir (yynt-get-file-build-fullname d bobj))
-			(files (yynt-directory-files full-dir))
+			(files (yynt--directory-files full-dir))
 			(final (mapcar (lambda (x) (file-name-concat full-dir x))
 				       (cl-remove-if pred files))))
 		   (yynt-publish-attach-cached project final force)))))))
@@ -1106,7 +1111,7 @@ published."
 	 (pred (funcall (yynt-build--excluded-fn-2 bobj)
 			bobj dir))
 	 (files (let ((default-directory bdir))
-		  (yynt-directory-files dir)))
+		  (yynt--directory-files dir)))
 	 (files-1 (cl-remove-if pred files)))
     (mapcar (lambda (x) (file-name-concat dir-0 x))
 	    files-1)))
