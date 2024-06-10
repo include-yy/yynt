@@ -503,6 +503,7 @@ predicate function. PATH is the path relative to the bobj directory that
 contains resources. The returned predicate function returns nil for file
 names that need to be published and t for file names that do not need to
 be published."
+  ;; FIXME: Add external-files checker
   (unless (yynt-project-p project)
     (error "seems not a valid yynt-project: %s" project))
   (unless (and (integerp type) (<= 0 type 2))
@@ -883,7 +884,7 @@ BOBJS must belong to the same project."
 			       (yynt-build--name b)
 			       (yynt--get-current-time)))
 	    (yynt--export-files b files-1 nil force)))
-	(yynt--log (format "<EXPORTING %s object's ex files --- %s\n"
+	(yynt--log (format "<<EXPORTING %s object's ex files --- %s\n"
 			   (length bobjs)
 			   (yynt--get-current-time)))
 	(dolist (b bobjs)
@@ -927,9 +928,10 @@ invoked with C-u, force export."
     (let* ((bobj (yynt-get-file-build-object file)))
       (if (null bobj)
 	  (user-error "file %s seems not belong to any build object" file)
-	(yynt--log "<EXPORTING %s in {%s} --- %s"
+	(yynt--log "<<<EXPORTING %s in {%s → %s} --- %s"
 		   (yynt-get-file-project-basename file)
 		   (yynt-buildm-project-name bobj)
+		   (yynt-build--name bobj)
 		   (yynt--get-current-time))
 	(let* ((project (yynt-build--project bobj))
 	       (conv-fn (yynt-build--convert-fn bobj))
@@ -1152,15 +1154,35 @@ If invoked with C-u, force publish."
 ;;; Miscellaneous Utils
 
 (defun yynt-p1 (regexp)
+  "Accept a regular expression as input, and return a function that takes
+BOBJ as a parameter and returns a list of absolute paths of files under
+the BOBJ root directory that match the regular expression.
+
+The function can be used to generate collect member in type-1 object."
   (lambda (bobj)
     (directory-files (yynt-build--path bobj) t regexp)))
 
 (defun yynt-p1s (files)
+  "Accept a list of files and return a function that takes BOBJ as a
+parameter and returns the list of absolute paths of these files under
+the BOBJ directory.
+
+The function can be used to generate collect-ex member in type-1 and
+type-2 object."
   (lambda (bobj)
     (mapcar (lambda (x) (file-name-concat (yynt-build--path bobj) x))
 	    files)))
 
 (defun yynt-p2 (reg1 reg2)
+  "Accept REG1 and REG2 as parameters and return a function that takes BOBJ
+as a parameter and returns a list of absolute paths of all files in
+type-2 that meet the conditions.
+
+Here, REG1 is used to match all directories in the BOBJ directory that
+meet the conditions, and REG2 is used to match the files in each
+directory that meet the conditions.
+
+The function can be used to generate the collect member function for type-2."
   (lambda (bobj)
     (let ((dirs (cl-remove-if-not
 		 #'file-directory-p
@@ -1171,10 +1193,23 @@ If invoked with C-u, force publish."
 	  (push f ret))))))
 
 (defun yynt-c2 (reg)
+  "Accept a regular expression as a parameter and return a function that
+takes BOBJ as a parameter and returns a list of relative paths of files
+in the root directory that match REG.
+
+This function can be used to generate the collect-2 member function for
+type-2 objects."
   (lambda (bobj)
     (directory-files (yynt-build--path bobj) nil reg)))
 
 (defun yynt-e2 (reg)
+  "Accept a regular expression as a parameter and return a function that
+takes BOBJ and relative directory path as parameters, and then returns a
+function that takes a file as a parameter and checks if the file matches
+the regular expression REG.
+
+This function can be used to generate the excluded-fn-2 member function
+for type-2 objects."
   (lambda (_bobj _path)
     (lambda (file)
       (string-match-p reg file))))
