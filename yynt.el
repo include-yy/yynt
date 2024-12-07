@@ -236,42 +236,17 @@ NAME is the name of the project and is of symbol type."
   "Determine whether PROJECT has pubdir."
   (yynt-project--pubdir project))
 
-(defun yynt--get-file-proj-base (file project)
+(defun yynt-get-file-project-basename (file project)
   "Get the relative path of a FILE with respect to its PROJECT."
   (if (not (yynt--in-project-p file project))
       (error "file %s not in project %s" file project)
     (let ((dir (yynt-project--dir project)))
       (substring file (length dir)))))
 
-(defun yynt--get-file-proj-full (file project)
+(defun yynt-get-file-project-fullname (file project)
   "Get the full path of FILE with respect to its PROJECT."
   (let ((dir (yynt-project--dir project)))
     (file-name-concat dir file)))
-
-;; Add checker for PUBLIC APIs
-(defun yynt--check-file-project (file project)
-  "Check if file and project are valid.
-
-Used internally just for `yynt-get-file-project-basename' and
-`yynt-get-file-project-fullname'."
-  (unless (yynt--valid-filename-p file)
-    (error "invalid file argument: %s" file))
-  (unless (yynt-project-p project)
-    (error "Seems not a valid project object: %s" project)))
-
-(defun yynt-get-file-project-basename (file project)
-  "Get the relative path of a FILE with respect to its PROJECT.
-
-If it is slow, try to use `yynt--get-file-proj-base' instead."
-  (yynt--check-file-project file project)
-  (yynt--get-file-proj-base file project))
-
-(defun yynt-get-file-project-fullname (file project)
-  "Get the full path of FILE with respect to its PROJECT.
-
-If it is slow, try to use `yynt--get-file-proj-full' instead."
-  (yynt--check-file-project file project)
-  (yynt--get-file-proj-full file project))
 
 ;;; Implementation of the caching functionality.
 
