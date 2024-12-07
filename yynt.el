@@ -211,8 +211,8 @@ NAME is the name of the project and is of symbol type."
 			      "Choose a project: "
 			      (mapcar #'yynt-project--name yynt-project-list)
 			      nil t))))
-  (if-let ((project (car-safe (cl-member name yynt-project-list
-					 :key #'yynt-project--name))))
+  (if-let* ((project (car-safe (cl-member name yynt-project-list
+					  :key #'yynt-project--name))))
       (setq yynt-current-project project)
     (user-error "Seems not a exist project object's name: %s" name)))
 
@@ -659,7 +659,7 @@ published attribute does not take effect and it will never be published."
 
 If the PROJECT parameter is not provided, `yynt-current-project' will be
 used as the project for lookup."
-  (when-let ((project (or project yynt-current-project)))
+  (when-let* ((project (or project yynt-current-project)))
     (cl-find-if (lambda (b) (yynt--in-build-p b file))
 		(yynt-project--builds project))))
 
