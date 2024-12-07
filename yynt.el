@@ -65,6 +65,8 @@ The logger will be used to output export messages and file publish messages."
 
 Set it using `yynt-choose-project'.")
 
+;; path not included, since SQL need it to be PRIMARY KEY
+;; Such as: "CREATE TABLE temp (path PRIMARY KEY,%s);"
 (defconst yynt-project-fixed-fields
   '("file_name" "build_name" "ex" "export_time" "publish_time")
   "Inherent fields in the cache database.
@@ -231,7 +233,7 @@ NAME is the name of the project and is of symbol type."
   (yynt-project--cache project))
 
 (defun yynt--project-has-pubdir-p (project)
-  "Determine whether PROJECT has pubdir"
+  "Determine whether PROJECT has pubdir."
   (yynt-project--pubdir project))
 
 (defun yynt-get-file-project-basename (file project)
