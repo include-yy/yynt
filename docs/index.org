@@ -1,4 +1,0 @@
-#+TITLE: Documentation of yynt
-#+DATE: [2024-05-29 12:54]
-#+DESCRIPTION: documentation for yynt, a simple Org Publish manager
-
