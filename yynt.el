@@ -110,7 +110,8 @@ Get from `org-string-nw-p'."
   "Return t if S is a valid cache-item name. Otherwise return nil."
   (and (yynt--string-nw-p s)
        (string-match-p "[A-Za-z][0-9A-Za-z_]*" s)
-       (not (member s (cons "path" yynt-project-fixed-fields)))))
+       (not (string= s "path"))
+       (not (member s yynt-project-fixed-fields))))
 
 (defun yynt--valid-filename-p (file)
   "Determine if FILE is a valid path string."
