@@ -29,11 +29,7 @@
 ;;; Commentary:
 
 ;; TODO:
-;; - Better error signal
-;; - Consider make yynt-build's fn more generic(MAYBE)
-;; - Consider add dired support for export and publish
 ;; - Consider add a transient interface
-;; - Improve documentation and comments
 
 ;;; Code:
 
