@@ -256,7 +256,7 @@ NAME is the name of the project and is of symbol type."
 ;; individually(Instead, we can read from database).
 
 ;; The database has the following format:
-;; | path | fixed_field | ... | attrs  | ... |
+;; | path | fixed_field | ... | attrs | ... |
 
 (defvar yynt--sqlite-obj nil
   "Temporary database object, used in conjunction with `yynt-with-sqlite'.")
