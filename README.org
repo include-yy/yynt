@@ -1,3 +1,35 @@
-* yynt --- a simple org publish manager
+* yynt --- a simple Org publish manager
 
-WIP
+(If you are familiar with Org-mode and have used Org's export and publishing
+features, I hope this package can be helpful when needed; otherwise, it might
+not be very useful at the moment.)
+
+Just like =ox-publish=, =yynt= is a management tool for exporting Org files to
+other types of files (such as HTML, Markdown). It allows for the management of a
+series of Org files and their associated resource files by writing publication
+configurations. For building a blog, such management tools can help us retain
+the original directory structure, generate HTML at the target location, and move
+the associated resource files.
+
+** Features
+
+Compared to ox-publish, yynt has the following advantages and disadvantages:
+
+*PROS*
+
+- Project-local Cache File and More
+- More Flexible Export Options Configuration
+- Able to Describe Simple File Dependencies
+- Clear Directory Structure Differentiation
+
+*CONS*
+
+- More Complex Configuration Options
+- Does not support sitemap and =:make-index=
+- First Generate In-Place and Then Publish(PROS maybe)
+
+** Installation
+
+#+begin_src text
+M-x package-vc-install https://github.com/include-yy/yynt RET
+#+end_src
