@@ -13,7 +13,7 @@ the associated resource files.
 
 ** Features
 
-Compared to ox-publish, yynt has the following advantages and disadvantages:
+Compared to =ox-publish=, =yynt= has the following advantages and disadvantages:
 
 *PROS*
 
@@ -33,3 +33,8 @@ Compared to ox-publish, yynt has the following advantages and disadvantages:
 #+begin_src text
 M-x package-vc-install https://github.com/include-yy/yynt RET
 #+end_src
+
+=yynt= is not an out-of-the-box package; you need to write publication rules
+according to your needs (which might require hundreds of lines of Elisp :p ).
+
+** Configuration
