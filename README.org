@@ -1,3 +1,5 @@
+#+DATE: [2024-01-01]
+
 * yynt --- a simple Org publish manager
 
 (If you are familiar with Org-mode and have used Org's export and publishing
@@ -93,10 +95,11 @@ a project object. =yynt-create-project= has the following parameters:
   - If omitted, it defaults to the current directory at the time of the call.
 
 When calling =yynt-create-project=, it will create and return a =yynt-project=
-object. If =CACHE= is not nil, it will create and initialize a database
-file. The created project will be stored in the =yynt-project-list= list, and
-users can use the command =yynt-choose-project= to set the current project. We
-can use =yynt-create-build= to create build objects belonging to the project.
+object. If =CACHE= is not =nil=, it will create and initialize a database file
+if not exists. The created project will be stored in the =yynt-project-list=
+list, and users can use the command =yynt-choose-project= to set the current
+project. We can use =yynt-create-build= to create build objects belonging to the
+project.
 
 Here is a simple example of creating a project object:
 
@@ -106,3 +109,62 @@ Here is a simple example of creating a project object:
    "blog-build" "build.sqlite3"
    '("title" "filetags" "description" "date" "tmp"))
 #+end_src
+
+*** Create Build Object
+
+We can use =yynt-create-build= to create build objects attached to the project. This function has quite complex parameters(wow, 16 arguments):
+
+#+begin_src elisp
+  (cl-defun yynt-create-build (&key project path type collect info collect-ex
+  				  info-ex fn attrs no-cache-files ext-files
+  				  published convert-fn included-resources
+  				  collect-2 excluded-fn-2)
+    ...)
+#+end_src
+
+- =:project=, project object to which the build object belongs
+- =:path=, location of the build object, relative to the project's root directory
+- =:type=, type of build object, can be the numbers 0, 1, or 2
+- =:collect=, function that returns a list of files to be exported
+
+  =:collect= accepts a function that takes a build object as a parameter and
+  returns a list of absolute paths of the files to be exported, i.e., ~(bobj) =>
+  (list of abs-path)~. Here is a very simple example:
+  #+begin_src elisp
+    (lambda (bobj)
+      (mapcar (lambda (x) (file-name-concat (yynt-build--path bobj) x))
+    	  '("1.org" "2.org" "3.org")))
+  #+end_src
+  =yynt= provides several helper functions to get the list of files: =yynt-p1=,
+  =yynt-p1s=, and =yynt-p2=. =yynt-p1= accepts a regex and returns a function
+  that finds files matching the regex in the directory of the build
+  object. =yynt-p1s= accepts a list of files and returns a function that expands
+  the file paths to absolute paths using the build object's path:
+  #+begin_src elisp
+    :collect (yynt-p1 "^[0-9]+\\.org")
+    :collect-ex (yynt-p1s '("index.org" "tags.org"))
+  #+end_src
+  =yynt-p2= is mainly used for type 2 build objects. It accepts two regex
+  strings as parameters: the first one matches subdirectories in the build
+  object's directory, and the second one matches files to be exported in those
+  subdirectories. It returns a function object that can be used as
+  =:collect=. Here is an example of its usage:
+  #+begin_src elisp
+    :collect (yynt-p2 "^2" "\\.\\(htm\\|org\\)$")
+  #+end_src
+  For type 0 projects, the export files can be determined solely by =:path=;
+  =:collect= has no effect.
+- =:info=, =plist= of options in Org export
+- =:collect-ex=, similar to =:collect=, but used to get ex files
+- =:info-ex=, extra options
+- =:fn=, export function
+- =:attrs=, the list of keywords to be extracted from the files during export
+- =:no-cache-files=, list of files not to be exported, relative to the build object
+- =:ext-files=, external files that the project depends on, relative to the project
+- =:published=, whether the build object is published
+- =:convert-fn=, accepts the original file path and returns the export file path
+- =:included-resources=, resources included in the build object, can be file and
+  directory paths
+- =:collect-2=, returns all the subdirectories to be exported for type 2 build objects
+- =:excluded-fn-2=, returns the files and folders to be excluded in the
+  subdirectories for type 2 build objects
