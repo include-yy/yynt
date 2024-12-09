@@ -128,8 +128,8 @@ We can use =yynt-create-build= to create build objects attached to the project. 
 - =:collect=, function that returns a list of files to be exported
 
   =:collect= accepts a function that takes a build object as a parameter and
-  returns a list of absolute paths of the files to be exported, i.e., ~(bobj) =>
-  (list of abs-path)~. Here is a very simple example:
+  returns a list of absolute paths of the files to be exported, i.e.,
+  ~(bobj) => (list of abs-path)~. Here is a very simple example:
   #+begin_src elisp
     (lambda (bobj)
       (mapcar (lambda (x) (file-name-concat (yynt-build--path bobj) x))
@@ -152,7 +152,7 @@ We can use =yynt-create-build= to create build objects attached to the project. 
   #+begin_src elisp
     :collect (yynt-p2 "^2" "\\.\\(htm\\|org\\)$")
   #+end_src
-  For type 0 projects, the export files can be determined solely by =:path=;
+  For type 0 projects, the export files can be determined solely by =:path=.
   =:collect= has no effect.
 - =:info=, =plist= of options in Org export
 - =:collect-ex=, similar to =:collect=, but used to get ex files
