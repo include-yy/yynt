@@ -68,3 +68,41 @@ M-x package-vc-install https://github.com/include-yy/yynt RET
 After installation, add =(require 'yynt)= to your init file or somewhere using functions from yynt.el.
 
 ** Configuration
+
+*** Create Project
+
+In yynt, a project can be compared to a combination object in =ox-publish=. It
+consists of one or more build objects. We can use =yynt-create-project= to create
+a project object. =yynt-create-project= has the following parameters:
+
+#+begin_src elisp
+  (defun yynt-create-project (name pubdir cache cache-items &optional directory) ...)
+#+end_src
+
+- =NAME=: Project name symbol
+  - Project names cannot be =t=, =nil=, or keywords.
+- =PUBDIR=: Publish directory
+  - If it's a relative path, it is relative to the project's root directory.
+- =CACHE=: Cache file name
+  - If it's a relative path, it is relative to the project's directory. If it is
+    =nil=, it means the project does not use a cache.
+- =CACHE-ITEMS=: List of keywords
+  - A list of keywords collected from the beginning of Org files during export
+    and publishing processes.
+- =DIRECTORY=: Project root directory
+  - If omitted, it defaults to the current directory at the time of the call.
+
+When calling =yynt-create-project=, it will create and return a =yynt-project=
+object. If =CACHE= is not nil, it will create and initialize a database
+file. The created project will be stored in the =yynt-project-list= list, and
+users can use the command =yynt-choose-project= to set the current project. We
+can use =yynt-create-build= to create build objects belonging to the project.
+
+Here is a simple example of creating a project object:
+
+#+begin_src elisp
+  (yynt-create-project
+   'egh0bww1
+   "blog-build" "build.sqlite3"
+   '("title" "filetags" "description" "date" "tmp"))
+#+end_src
