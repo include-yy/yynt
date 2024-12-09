@@ -13,20 +13,14 @@ the associated resource files.
 
 ** Features
 
-Compared to =ox-publish=, =yynt= has the following advantages and disadvantages:
-
-*PROS*
+Compared to =ox-publish=, =yynt= has the following advantages:
 
 - Project-local Cache File and More
-- More Flexible Export Options Configuration
+- More Flexible(Complex) Export Options Configuration
 - Able to Describe Simple File Dependencies
 - Clear Directory Structure Differentiation
 
-*CONS*
-
-- More Complex Configuration Options
-- Does not support sitemap and =:make-index=
-- First Generate In-Place and Then Publish(PROS maybe)
+** Design
 
 ** Installation
 
