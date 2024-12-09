@@ -69,9 +69,9 @@ M-x package-vc-install https://github.com/include-yy/yynt RET
 
 After installation, add =(require 'yynt)= to your init file or somewhere using functions from yynt.el.
 
-** Configuration
+** Usage
 
-My blog build script [[https://github.com/include-yy/yynt/blob/master/yynt.el][yynt.el]] provides an example of using yynt.
+My blog build script [[https://github.com/include-yy/egh0bww1/blob/master/yy.el][yy.el]] provides an example of using yynt.
 
 *** Create Project
 
@@ -210,13 +210,53 @@ We can use =yynt-create-build= to create build objects attached to the project. 
     	  nil nil nil nil plist))
         t))
   #+end_src
-- =:attrs=, the list of keywords to be extracted from the files during export
-- =:no-cache-files=, list of files not to be exported, relative to the build object
-- =:ext-files=, external files that the project depends on, relative to the project
-- =:published=, whether the build object is published
-- =:convert-fn=, accepts the original file path and returns the export file path
-- =:included-resources=, resources included in the build object, can be file and
-  directory paths
+- =:attrs=, list of keywords to be extracted from the files during export
+
+  During export, =yynt= collects keyword information from the beginning of Org
+  files. The specific keywords selected are related to the project's =CACHE-ITEMS=
+  members, such as =title=, =filetags=, =description=, =date=, etc. We can specify the
+  required keywords through =:attrs=; these keywords must be part of the project's
+  =CACHE-ITEMS=. Here is an example of a blog header:
+  #+begin_src org
+    ,#+TITLE: 对 Org 导出管理工具 yynt 的介绍与实现注解
+    ,#+DATE: [2024-12-08 Sun 20:48]
+    ,#+FILETAGS: elisp
+    ,#+DESCRIPTION: 本文介绍了我实现的 Org 导出管理工具
+  #+end_src
+- =:no-cache-files=, list of files not to be exported, relative to the build object's root directory
+
+  We can specify files that do not need to be cached using
+  =:no-cache-files=. This means the export and publication information for these
+  files will not be recorded in the database, and the database will not store
+  any related information, including =:attrs=.
+
+  Generally, this option is only used for files from =:collect-ex=. For type 0
+  projects, setting this option to =t= means the files will not be cached.
+- =:ext-files=, external files that the project depends on, relative to the project's root directory
+
+  =:ext-files= can specify files outside the build object that depend on the
+  object's content. When a build object is exported or published, its external
+  files will also be exported or published, but other files in build objects
+  that contain these external files are not included.
+
+  When a file relies on information from another project (such as metadata in a
+  database), this parameter allows the file to be automatically updated and
+  exported or published when the other build object is updated.
+- =:published=, whether the build object is published, non-nil means published
+- =:convert-fn=, function that converts input file path to output file path
+
+  Here is a possible implementation:
+  #+begin_src elisp
+    (defun yynt/yy-convert-fn (file)
+      (if (string= "org" (file-name-extension file))
+          (file-name-with-extension file "html")
+        file))
+  #+end_src
+- =:included-resources=, resources included in the build object
+
+  This parameter specifies the list of resources included in the build
+  object. The files or directories in the list are relative to the root
+  directory of the build object.
 - =:collect-2=, returns all the subdirectories to be exported for type 2 build objects
 - =:excluded-fn-2=, returns the files and folders to be excluded in the
   subdirectories for type 2 build objects
