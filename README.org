@@ -20,15 +20,20 @@ Compared to =ox-publish=, =yynt= has the following advantages:
 - Able to Describe Simple File Dependencies
 - Clear Directory Structure Differentiation
 
+I don't list disadvantages here, but actually =yynt= is not an out-of-the-box
+package; you need to write publication rules according to your needs (which
+might require hundreds of lines of Elisp :p ).
+
 ** Design
 
 ** Installation
+
+You can it using =package-vc= (require Emacs 29.1 or above):
 
 #+begin_src text
 M-x package-vc-install https://github.com/include-yy/yynt RET
 #+end_src
 
-=yynt= is not an out-of-the-box package; you need to write publication rules
-according to your needs (which might require hundreds of lines of Elisp :p ).
+After installation, add =(require 'yynt)= to your init file or somewhere using functions from yynt.el.
 
 ** Configuration
