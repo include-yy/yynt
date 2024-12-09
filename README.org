@@ -26,6 +26,37 @@ might require hundreds of lines of Elisp :p ).
 
 ** Design
 
+When I use Org to write blogs, I want a file that can aggregate information from
+other files, such as titles and categories. This requires me to read the
+contents of certain files, and this file is special because it may need to be
+re-exported due to changes in other files. To avoid repeatedly reading files, I
+can store certain information when exporting regular files and use this
+information when exporting special files. Additionally, I can ensure that
+special files are also exported after regular files to keep the information up
+to date.
+
+To achieve the above goals, I implemented a caching function based on Emacs
+SQLite support. It records the export time, publication time, file path, and
+keyword strings from the file header when exporting regular files. These
+timestamps can be used for incremental updates during export or publication, and
+the keyword information can be used for the export of special files without
+multiple file reads. Users can set the keywords that need to be read.
+
+I divide files into regular files and ex files. The former are exported earlier
+in the process, and the latter can utilize the information in the database from
+the former. Regular files in one project can become dependencies for ex files in
+another project. When multiple projects are exported simultaneously, I ensure
+that ex files are always exported later than all regular files.
+
+Instead of placing blog files in a folder and then centrally placing resources
+(such as images, videos, code files, etc.) in another folder, I prefer to
+prepare a folder for each blog, placing the Org file and its associated resource
+files in the folder. I have different project types for different directory
+structures: 0 represents a single file, 1 represents a single-layer directory,
+and 2 represents a two-layer directory. Compared to recursively searching for
+export files like ox-publish, clearly distinguishing between different directory
+structures may be clearer.
+
 ** Installation
 
 You can it using =package-vc= (require Emacs 29.1 or above):
