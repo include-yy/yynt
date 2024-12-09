@@ -71,6 +71,8 @@ After installation, add =(require 'yynt)= to your init file or somewhere using f
 
 ** Configuration
 
+My blog build script [[https://github.com/include-yy/yynt/blob/master/yynt.el][yynt.el]] provides an example of using yynt.
+
 *** Create Project
 
 In yynt, a project can be compared to a combination object in =ox-publish=. It
@@ -152,12 +154,62 @@ We can use =yynt-create-build= to create build objects attached to the project. 
   #+begin_src elisp
     :collect (yynt-p2 "^2" "\\.\\(htm\\|org\\)$")
   #+end_src
-  For type 0 projects, the export files can be determined solely by =:path=.
+  For type 0 build object, the export files can be determined solely by =:path=.
   =:collect= has no effect.
 - =:info=, =plist= of options in Org export
+
+  This list is used to specify options for exporting the files obtained by
+  =:collect=. Specific options can be referenced from [[https://orgmode.org/manual/Publishing-options.html][Options for the exporters]]
+  or the options provided by the specific backend in use. Here is a simple
+  example:
+  #+begin_src elisp
+    :info '( :with-sub-superscript {} ; #+options: ^:{}
+             :html-head-include-default-style nil ; #+options: html-style:nil
+             )
+  #+end_src
 - =:collect-ex=, similar to =:collect=, but used to get ex files
-- =:info-ex=, extra options
+
+  In design, =:collect= is used to obtain regular files to be exported, whereas
+  =:collect-ex= is used to obtain special files to be exported. These special
+  files may need to generate content based on the information from the regular
+  files (such as titles, tags, and other metadata).
+
+  For type 0 build object, =:collect-ex= has no effect.
+- =:info-ex=, extra options used for ex files
+
+  When exporting, =:info-ex= will be merged with =:info= and applied to the
+  files from =:collect-ex=. =:info-ex= has higher priority.
+
+  For type 0 build object, =:info-ex= does not take effect; for type 2 build
+  object, =:info= is used for files within the second-level directory, while
+  =:info-ex= is used for files within the first-level directory.
+
 - =:fn=, export function
+
+  =:fn= accepts a function that has three parameters: export options =plist=,
+  the absolute path of the input file =in=, and the absolute path of the output
+  file =out=. This function will export the current buffer and output the result
+  to the specified output file path. If the function does not raise an error,
+  the export is considered successful.
+
+  Org's various export backends define export functions. We can call the unified
+  export function =org-export-to-file=, which will export the current buffer and
+  save it to the specified file. Below is an example of calling
+  =org-export-to-file= and a sample function that can be used as the :fn
+  parameter:
+  #+begin_src elisp
+    (org-export-to-file 'html "index.html"
+      nil nil nil nil plist)
+
+    (defun yynt/yy-fn (plist in out)
+      (if (string-match-p "\\.org$" in)
+          (let ((default-directory (file-name-directory in))
+    	    (org-export-coding-system org-w3ctr-coding-system)
+    	    (org-export-use-babel org-w3ctr-use-babel))
+    	(org-export-to-file 'w3ctr out
+    	  nil nil nil nil plist))
+        t))
+  #+end_src
 - =:attrs=, the list of keywords to be extracted from the files during export
 - =:no-cache-files=, list of files not to be exported, relative to the build object
 - =:ext-files=, external files that the project depends on, relative to the project
