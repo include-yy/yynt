@@ -28,12 +28,12 @@
 
 ;;; Commentary:
 
-;; Just like `ox-publish', =yynt= is a management tool for exporting Org files
-;; to other types of files (such as HTML, Markdown). It allows for the
-;; management of a series of Org files and their associated resource files by
-;; writing publication configurations. For building a blog, such management
-;; tools can help us retain the original directory structure, generate HTML at
-;; the target location, and move the associated resource files.
+;; Just like `ox-publish', yynt is a management tool for exporting Org files to
+;; other types of files (such as HTML, Markdown). It allows for the management
+;; of a series of Org files and their associated resource files by writing
+;; publication configurations. For building a blog, such management tools can
+;; help us retain the original directory structure, generate HTML at the target
+;; location, and move the associated resource files.
 
 ;; Please refer to the documentation for `yynt-create-project' and
 ;; `yynt-create-build' to learn how to create projects and build objects. Then,
@@ -232,7 +232,7 @@ NAME is the name of the project and is of symbol type."
 (defun yynt--in-project-p (file project)
   "Determine if a file is located within the project."
   ;; `file-in-directory-p' is too slow
-  ;;(file-in-directory-p file (yynt-project--dir project))
+  ;; (file-in-directory-p file (yynt-project--dir project))
   (let* ((pdir (yynt-project--dir project))
 	 (len (length pdir)))
     (and (>= (length file) len)
@@ -416,7 +416,7 @@ For the argument VALUES and RETURN-TYPE, see `sqlite-select' docstring."
 Unlike `yynt-select', when using this function, we assume we are in a
 database environment, which usually occurs during export or occurrence.
 a.k.a calling `yynt-export-file', `yynt-export-build',
-`yynt-publish-file' and `yynt-publish-build'"
+`yynt-publish-file' and `yynt-publish-build'."
   (sqlite-select yynt--sqlite-obj query values return-type))
 
 (defun yynt-delete-missing-cache (project)
@@ -1165,6 +1165,10 @@ If FORCE is non-nil, FILE will always be published."
 		   (- (float-time) start-time)))))))
 
 (defun yynt--get-publish-file-2 (file bobj)
+  "Get a list of all the files that need to be published in the subfolder
+where FILE is located.
+
+used for type 2 objects."
   (let* ((bdir (yynt-build--path bobj))
 	 (dir-0 (file-name-directory file))
 	 (dir (file-name-base
