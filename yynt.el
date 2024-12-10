@@ -410,7 +410,7 @@ For the argument VALUES and RETURN-TYPE, see `sqlite-select' docstring."
     (yynt-with-sqlite project
       (sqlite-select yynt--sqlite-obj query values return-type))))
 
-(defun yynt-select* (query values return-type)
+(defun yynt-select* (query &optional values return-type)
   "Select data from current cache database that matches QUERY.
 
 Unlike `yynt-select', when using this function, we assume we are in a
