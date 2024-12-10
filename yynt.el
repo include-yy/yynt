@@ -6,8 +6,8 @@
 ;; Maintainer: include-yy <yy@egh0bww1.com>
 ;; Created: 22 Apr 2024
 
-;; Package-Version: 0.1
-;; Package-Requires: ((emacs "29.2"))
+;; Package-Version: 1.0
+;; Package-Requires: ((emacs "29.1"))
 ;; Keywords: manager
 ;; URL: https://github.com/include-yy/yynt
 
@@ -27,6 +27,20 @@
 ;; along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 ;;; Commentary:
+
+;; Just like `ox-publish', =yynt= is a management tool for exporting Org files
+;; to other types of files (such as HTML, Markdown). It allows for the
+;; management of a series of Org files and their associated resource files by
+;; writing publication configurations. For building a blog, such management
+;; tools can help us retain the original directory structure, generate HTML at
+;; the target location, and move the associated resource files.
+
+;; Please refer to the documentation for `yynt-create-project' and
+;; `yynt-create-build' to learn how to create projects and build objects. Then,
+;; use the `yynt-export-*' and `yynt-publish-*' series of functions for
+;; exporting and publishing.
+
+;; Please read README.org to access the complete documentation.
 
 ;; TODO:
 ;; - Consider add a transient interface
