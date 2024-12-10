@@ -407,4 +407,53 @@ publication, and we can view its output using the =yynt-logger= command.
 
 *** Using the Database
 
+The table name in the database is =YYNT=, and its structure is as follows:
+
+#+begin_src elisp
+  ;; The database has the following format:
+  ;; | path | fixed_field | ... | attrs | ... |
+#+end_src
+
+=path= is the path of the file relative to the project root
+directory. =fixed_field= refers to the fields in =yynt-project-fixed_fields=,
+which are =file_name=, =build_name=, =ex=, =export_time=, and =publish_time=.
+
+- =file_name= is the file name without any path prefix.
+- =build_name= is the name of the build object the file belongs to.
+- =ex= indicates whether the file is a special file. 1 means it is, 0 means it is not.
+- =export_time= and =publish_time= record the export and publish times respectively.
+
+=attrs= comes from the project's =CACHE-ITEMS=, which are user-defined keywords
+obtained from the Org file header.
+
+=yynt= provides two functions, =yynt-select= and =yynt-select*=, to read the
+database. The former requires specifying the project object and context
+information, while the latter only requires specifying the query
+statement. Since the =yynt-export/publish-file/object= series of functions ensures
+the database context, using the latter is much more convenient. Here is a simple
+usage example:
+
+#+begin_src elisp
+  (yynt-select* "\
+  SELECT path, title FROM YYNT WHERE
+  build_name='posts' AND ex='0' AND file_name LIKE 'index%'
+  ORDER BY path DESC
+  LIMIT ?" (list (or limit 100000)))
+#+end_src
+
+Using these retrieved data rows, we can further generate Org or HTML code. We
+can use Org's macros to insert content during export (the macro needs to return
+the insertion content string; for specifics, you can refer to [[https://orgmode.org/manual/Macro-Replacement.html][Macro
+Replacement]]).
+
+#+begin_src elisp
+  # define macro
+  ,#+MACRO: foo (eval "hello")
+  # use macro
+  {{{foo}}}
+#+end_src
+
+We can use =yynt-delete-missing-cache= to delete entries in the database of the
+current project for which the corresponding files do not exist.
+
 ** API list
