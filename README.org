@@ -457,3 +457,46 @@ We can use =yynt-delete-missing-cache= to delete entries in the database of the
 current project for which the corresponding files do not exist.
 
 ** API list
+
+Please refer to their docstrings to understand the usage.
+
+*** Object Creation =3=
+
+- =yynt-create-project=
+- =yynt-create-build=
+- =yynt-choose-project=
+
+*** Filename Conversion =5=
+
+- =yynt-get-file-project-basename=
+- =yynt-get-file-project-fullname=
+- =yynt-get-file-build-basename=
+- =yynt-get-file-build-fullname=
+- =yynt-get-file-build-object=
+
+*** SQL Operation =4=
+
+- =yynt-with-sqlite=
+- =yynt-select=
+- =yynt-select*=
+- =yynt-delete-missing-cache=
+
+*** Export/Publish =8=
+
+- =yynt-export-build-object-list=
+- =yynt-export-build=
+- =yynt-export-file=
+- =yynt-export-current-buffer=
+- =yynt-publish-build-object-list=
+- =yynt-publish-build=
+- =yynt-publish-file=
+- =yynt-logger=
+
+*** Miscellaneous =6=
+
+- =yynt-combine-plists=
+- =yynt-p1=
+- =yynt-p1s=
+- =yynt-p2=
+- =yynt-c2=
+- =yynt-e2=
