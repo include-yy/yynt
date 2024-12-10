@@ -105,7 +105,8 @@ list, and users can use the command =yynt-choose-project= to set the current
 project. We can use =yynt-create-build= to create build objects belonging to the
 project.
 
-If a project object with the same name already exists in =yynt-project-list=, =yynt-create-project= will replace the old object with the new one.
+If a project object with the same name already exists in =yynt-project-list=,
+=yynt-create-project= will replace the old object with the new one.
 
 Here is a simple example of creating a project object:
 
@@ -118,7 +119,8 @@ Here is a simple example of creating a project object:
 
 *** Create Build Object
 
-We can use =yynt-create-build= to create build objects attached to the project. This function has quite complex parameters(wow, 16 arguments):
+We can use =yynt-create-build= to create build objects attached to the
+project. This function has quite complex parameters(wow, 16 arguments):
 
 #+begin_src elisp
   (cl-defun yynt-create-build (&key project path type collect info collect-ex
@@ -278,9 +280,9 @@ We can use =yynt-create-build= to create build objects attached to the project. 
   #+begin_src elisp
   :collect-2 (yynt-c2 "^2")
   #+end_src
-- =:excluded-fn-2=, function that takes build object =bobj= and a subdirectory =sd= of
-  =bobj= as parameter and returns a predicate function to determine whether the
-  files and folders in =sd= should be excluded during publication
+- =:excluded-fn-2=, function that takes build object =bobj= and a subdirectory
+  =sd= of =bobj= as parameter and returns a predicate function to determine
+  whether the files and folders in =sd= should be excluded during publication
 
   The subdirectory parameter for this function is the path relative to the root
   directory of the build object. The predicate function accepts the path of a
@@ -380,6 +382,29 @@ Here are some examples from my configuration:
 
 *** Export and Publish
 
-*** Use Database
+When we want to preview the current progress after completing a blog or during
+the writing process, we can use the =yynt-export-file= command in the buffer
+where the blog is located. This will export the file of the current buffer and
+update the necessary special files and external files. If we want to export a
+build object, we can use the =yynt-export-build= command, which will pop up a
+minibuffer to let us choose the build object based on =yynt-current-project=
+(=*t*= is special and represents building all objects in the project). If we
+only want to build the current file, we can use =yynt-export-current-buffer=,
+which does not consider any dependencies.
+
+When we want to publish a blog, the =yynt-publish-file= command can publish the
+current file and the files that depend on it, such as affiliated resources, ex
+files, and external files, considering the dependencies. We can use
+=yynt-publish-build= to publish a specific build object. Because =yynt= caches
+timestamps and other information, export and publish operations are incremental.
+
+During export, =yynt= first exports the regular files of each project, then the
+ex files, and finally the external files. This ensures that when ex or external
+files obtain database information, the database is up-to-date.
+
+=yynt= outputs log information to the =*yynt*= buffer during export and
+publication, and we can view its output using the =yynt-logger= command.
+
+*** Using the Database
 
 ** API list
