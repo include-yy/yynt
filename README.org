@@ -188,7 +188,8 @@ project. This function has quite complex parameters(wow, 16 arguments):
   files may need to generate content based on the information from the regular
   files (such as titles, tags, and other metadata).
 
-  For type 0 build object, =:collect-ex= has no effect.
+  For type 0 objects, if this parameter is set to =t=, then the file in the
+  object is considered special file rather than regular file.
 - =:info-ex=, extra options used for ex files
 
   When exporting, =:info-ex= will be merged with =:info= and applied to the
