@@ -99,11 +99,16 @@ following parameters:
   - If omitted, it defaults to the current directory at the time of the call.
 
 When calling =yynt-create-project=, it will create and return a =yynt-project=
-object. If =CACHE= is not =nil=, it will create and initialize a database file
-if not exists. The created project will be stored in the =yynt-project-list=
+object. If =CACHE= is not =nil=, it will create(if not exists) and initialize a
+database file. The created project will be stored in the =yynt-project-list=
 list, and users can use the command =yynt-choose-project= to set the current
 project. We can use =yynt-create-build= to create build objects belonging to the
 project.
+
+During database initialization, if an existing database is detected and the
+=CACHE-ITEMS= do not match the existing fields in the database, the database
+will be reinitialized, but the data for fields that still exist will be
+preserved.
 
 If a project object with the same name already exists in =yynt-project-list=,
 =yynt-create-project= will replace the old object with the new one.
@@ -132,6 +137,9 @@ project. This function has quite complex parameters(wow, 16 arguments):
 
 - =:project=, project object to which the build object belongs
 - =:path=, location of the build object, relative to the project's root directory
+
+  For type 0 objects, =:path= is the file path relative to the project. The paths
+  of different objects cannot be the same.
 - =:type=, type of build object, can be the numbers 0, 1, or 2
 - =:collect=, function that returns a list of files to be exported
 
