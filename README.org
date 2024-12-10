@@ -56,8 +56,8 @@ prepare a folder for each blog, placing the Org file and its associated resource
 files in the folder. I have different project types for different directory
 structures: 0 represents a single file, 1 represents a single-layer directory,
 and 2 represents a two-layer directory. Compared to recursively searching for
-export files like ox-publish, clearly distinguishing between different directory
-structures may be clearer.
+export files like =ox-publish=, clearly distinguishing between different
+directory structures may be clearer.
 
 ** Installation
 
@@ -67,7 +67,8 @@ You can it using =package-vc= (require Emacs 29.1 or above):
 M-x package-vc-install https://github.com/include-yy/yynt RET
 #+end_src
 
-After installation, add =(require 'yynt)= to your init file or somewhere using functions from yynt.el.
+After installation, add =(require 'yynt)= to your init file or somewhere using
+functions from yynt.el.
 
 ** Usage
 
@@ -75,9 +76,10 @@ My blog build script [[https://github.com/include-yy/egh0bww1/blob/master/yy.el]
 
 *** Create Project
 
-In yynt, a project can be compared to a combination object in =ox-publish=. It
-consists of one or more build objects. We can use =yynt-create-project= to create
-a project object. =yynt-create-project= has the following parameters:
+In =yynt=, a project can be compared to a =:components= project in
+=ox-publish=. It consists of one or more build objects. We can use
+=yynt-create-project= to create a project object. =yynt-create-project= has the
+following parameters:
 
 #+begin_src elisp
   (defun yynt-create-project (name pubdir cache cache-items &optional directory) ...)
@@ -102,6 +104,8 @@ if not exists. The created project will be stored in the =yynt-project-list=
 list, and users can use the command =yynt-choose-project= to set the current
 project. We can use =yynt-create-build= to create build objects belonging to the
 project.
+
+If a project object with the same name already exists in =yynt-project-list=, =yynt-create-project= will replace the old object with the new one.
 
 Here is a simple example of creating a project object:
 
@@ -140,7 +144,7 @@ We can use =yynt-create-build= to create build objects attached to the project. 
   =yynt= provides several helper functions to get the list of files: =yynt-p1=,
   =yynt-p1s=, and =yynt-p2=. =yynt-p1= accepts a regex and returns a function
   that finds files matching the regex in the directory of the build
-  object. =yynt-p1s= accepts a list of files and returns a function that expands
+  object. =yynt-p1s= accepts a list of file and returns a function that expands
   the file paths to absolute paths using the build object's path:
   #+begin_src elisp
     :collect (yynt-p1 "^[0-9]+\\.org")
@@ -195,7 +199,7 @@ We can use =yynt-create-build= to create build objects attached to the project. 
   Org's various export backends define export functions. We can call the unified
   export function =org-export-to-file=, which will export the current buffer and
   save it to the specified file. Below is an example of calling
-  =org-export-to-file= and a sample function that can be used as the :fn
+  =org-export-to-file= and a sample function that can be used as the =:fn=
   parameter:
   #+begin_src elisp
     (org-export-to-file 'html "index.html"
@@ -235,7 +239,7 @@ We can use =yynt-create-build= to create build objects attached to the project. 
   Generally, this option is only used for files from =:collect-ex=. For type 0
   build objects, setting this option to =t= means the files will not be cached.
 - =:ext-files=, external files that the build object depends on, relative to the
-  object's root directory
+  project object's root directory
 
   =:ext-files= can specify files outside the build object that depend on the
   object's content. When a build object is exported or published, its external
@@ -282,8 +286,24 @@ We can use =yynt-create-build= to create build objects attached to the project. 
   directory of the build object. The predicate function accepts the path of a
   file relative to the subdirectory as its parameter. If the function returns =t=,
   it means the file should be excluded during publication; otherwise, it should
-  be moved to the publication location.
-
+  be moved to the publication location. Here is an explanatory example:
+  #+begin_src elisp
+    (lambda (_bobj subdir)
+      (cond
+       ;; in subdirectory path1
+       ((string= subdir path1)
+        ;; pred that exclude all org file
+        (lambda (filename)
+          (string-match-p "\\.org$" filename)))
+       ((string= subdir path2)
+        ;; pred that exclude all png file
+        (lambda (filename)
+          (string-match-p "\\.png" filename)))
+       ((string= subdir path2) pred2)
+       ...
+       ;; exclude no file
+       (t (lambda (_f) nil))))
+  #+end_src
   In short, =:excluded-fn-2= can be used to determine which files in the
   subdirectories of a type 2 project should not be published. =yynt= provides a
   helper function =yynt-e2=, which accepts a regex. The function it generates will
@@ -357,3 +377,9 @@ Here are some examples from my configuration:
   	     :section-numbers nil
   	     :html-zeroth-section-tocname nil))
 #+end_src
+
+*** Export and Publish
+
+*** Use Database
+
+** API list
