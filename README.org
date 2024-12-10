@@ -274,7 +274,8 @@ project. This function has quite complex parameters(wow, 16 arguments):
 
   This parameter specifies the list of resources included in the build
   object. The files or directories in the list are relative to the root
-  directory of the build object.
+  directory of the build object. For type 0 build object, they are relative to
+  the project's directory.
 - =:collect-2=, function that returns a list of absolute paths of the
   subdirectories to be exported in the build object
 

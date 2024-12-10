@@ -493,8 +493,8 @@ PROJECT is used as the project object pointed to by the build object.
 
 PATH is a path string relative to the project path.
 
-TYPE is a numeric identifier for the build object' type. It can be 0, 1,
-or 2, representing a single file, one-level directory, and two-level
+TYPE is a numeric identifier for the build object's type. It can be 0,
+1, or 2, representing a single file, one-level directory, and two-level
 directory, respectively.
 
 COLLECT is a function that accepts a build object and returns all the
