@@ -715,6 +715,9 @@ used as the project for lookup."
 If NEWLINE is non-nil, this function will add a newline at the
 end of the MESSAGE."
   (when yynt-use-logger
+    (when (string= message "fail")
+      (display-warning 'yynt "An export failed. Try searching for \
+'fail' in the yynt buffer to locate the issues."))
     (with-current-buffer (yynt--create-log-buffer)
       (let ((inhibit-read-only t))
 	(goto-char (point-max))
