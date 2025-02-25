@@ -28,17 +28,18 @@
 
 ;;; Commentary:
 
-;; Just like `ox-publish', yynt is a management tool for exporting Org files to
-;; other types of files (such as HTML, Markdown). It allows for the management
-;; of a series of Org files and their associated resource files by writing
-;; publication configurations. For building a blog, such management tools can
-;; help us retain the original directory structure, generate HTML at the target
-;; location, and move the associated resource files.
+;; Just like `ox-publish', yynt is a management tool for exporting Org
+;; files to other types of files (such as HTML, Markdown). It allows for
+;; the management of a series of Org files and their associated resource
+;; files by writing publication configurations. For building a blog,
+;; such management tools can help us retain the original directory
+;; structure, generate HTML at the target location, and move the
+;; associated resource files.
 
 ;; Please refer to the documentation for `yynt-create-project' and
-;; `yynt-create-build' to learn how to create projects and build objects. Then,
-;; use the `yynt-export-*' and `yynt-publish-*' series of functions for
-;; exporting and publishing.
+;; `yynt-create-build' to learn how to create projects and build
+;; objects. Then, use the `yynt-export-*' and `yynt-publish-*' series of
+;; functions for exporting and publishing.
 
 ;; Please read README.org to access the complete documentation.
 
@@ -1286,5 +1287,5 @@ for type-2 objects."
 
 ;; Local Variables:
 ;; emacs-lisp-docstring-fill-column: 72
-;; fill-column: 80
+;; fill-column: 72
 ;; End:
