@@ -428,13 +428,15 @@ a.k.a calling `yynt-export-file', `yynt-export-build',
     (if (not (yynt--project-has-cache-p project))
 	(user-error "project doesn't have cache file")
       (yynt-with-sqlite project
-	(let ((files (car (sqlite-select yynt--sqlite-obj
-					 "SELECT path FROM yynt")))
+	(let ((files (mapcar #'car
+                             (sqlite-select
+                              yynt--sqlite-obj
+			      "SELECT path FROM yynt")))
 	      nofiles)
 	  (dolist (f files)
 	    (let ((full (yynt-get-file-project-fullname f project)))
 	      (unless (file-exists-p full)
-		(push full nofiles))))
+		(push f nofiles))))
 	  (dolist (n nofiles)
 	    (yynt--delete-cache project n))
 	  (message "delete %s rows" (length nofiles))
